@@ -121,6 +121,22 @@ configuration:
       Log frame processing statistics periodically.
       Useful for performance tuning.
   
+  debug_save_frames:
+    name: Save Debug Frames
+    description: >-
+      Save processed frames to /share/detect-hand-debug for troubleshooting.
+      Shows original, preprocessed, and annotated frames with hand landmarks.
+  
+  debug_save_interval:
+    name: Debug Save Interval (seconds)
+    description: >-
+      How often to save debug frames. Lower values provide more frames but use more disk space.
+  
+  debug_frame_path:
+    name: Debug Frame Path
+    description: >-
+      Path where debug frames are saved. Use /share/ for access from Home Assistant.
+  
   rtsp_reconnect_delay_seconds:
     name: RTSP Reconnect Delay
     description: Seconds to wait between RTSP reconnection attempts.

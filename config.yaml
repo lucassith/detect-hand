@@ -3,7 +3,7 @@
 
 name: "Open Palm Detection"
 description: "Detects open palm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.0.1"
+version: "1.0.2"
 slug: "detect-hand"
 init: false
 arch:
@@ -48,6 +48,11 @@ options:
   log_detection_events: true
   log_frame_stats: false
   
+  # Debug Configuration
+  debug_save_frames: false
+  debug_save_interval: 30
+  debug_frame_path: "/share/detect-hand-debug"
+  
   # Connection Configuration
   rtsp_reconnect_delay_seconds: 5
   rtsp_max_reconnect_attempts: 0
@@ -86,6 +91,11 @@ schema:
   log_level: list(DEBUG|INFO|WARNING|ERROR)
   log_detection_events: bool
   log_frame_stats: bool
+  
+  # Debug Configuration
+  debug_save_frames: bool
+  debug_save_interval: int(1,300)
+  debug_frame_path: str
   
   # Connection Configuration
   rtsp_reconnect_delay_seconds: int(1,60)

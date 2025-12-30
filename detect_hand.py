@@ -90,6 +90,11 @@ class Config:
     log_detection_events: bool
     log_frame_stats: bool
     
+    # Debug Configuration
+    debug_save_frames: bool
+    debug_save_interval: int
+    debug_frame_path: str
+    
     # Connection Configuration
     rtsp_reconnect_delay_seconds: int
     rtsp_max_reconnect_attempts: int
@@ -160,6 +165,9 @@ class Config:
             log_level=get_value('log_level', 'LOG_LEVEL', 'INFO'),
             log_detection_events=get_value('log_detection_events', 'LOG_DETECTION_EVENTS', True, bool),
             log_frame_stats=get_value('log_frame_stats', 'LOG_FRAME_STATS', False, bool),
+            debug_save_frames=get_value('debug_save_frames', 'DEBUG_SAVE_FRAMES', False, bool),
+            debug_save_interval=get_value('debug_save_interval', 'DEBUG_SAVE_INTERVAL', 30, int),
+            debug_frame_path=get_value('debug_frame_path', 'DEBUG_FRAME_PATH', '/share/detect-hand-debug'),
             rtsp_reconnect_delay_seconds=get_value('rtsp_reconnect_delay_seconds', 'RTSP_RECONNECT_DELAY_SECONDS', 5, int),
             rtsp_max_reconnect_attempts=get_value('rtsp_max_reconnect_attempts', 'RTSP_MAX_RECONNECT_ATTEMPTS', 0, int),
             mqtt_reconnect_delay_seconds=get_value('mqtt_reconnect_delay_seconds', 'MQTT_RECONNECT_DELAY_SECONDS', 5, int),
@@ -315,7 +323,7 @@ class PalmDetector:
             f"tracking={config.confidence_threshold * 0.8:.2f}"
         )
     
-    def detect_open_palm(self, frame_rgb: np.ndarray) -> Tuple[bool, float, int]:
+    def detect_open_palm(self, frame_rgb: np.ndarray) -> Tuple[bool, float, int, Optional[Any]]:
         """
         Detect if an open palm is visible in the frame.
         
@@ -327,14 +335,16 @@ class PalmDetector:
             frame_rgb: RGB frame
             
         Returns:
-            Tuple of (is_open_palm, confidence, num_hands)
+            Tuple of (is_open_palm, confidence, num_hands, results_for_debug)
         """
         results = self.hands.process(frame_rgb)
         
         if not results.multi_hand_landmarks:
-            return False, 0.0, 0
+            self.logger.debug("No hands detected in frame")
+            return False, 0.0, 0, results
         
         num_hands = len(results.multi_hand_landmarks)
+        self.logger.debug(f"Detected {num_hands} hand(s) in frame")
         
         for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
             # Get handedness info if available
@@ -346,16 +356,39 @@ class PalmDetector:
                 hand_label = "Unknown"
                 confidence = 0.5
             
+            self.logger.debug(f"Hand {hand_idx}: label={hand_label}, confidence={confidence:.2f}")
+            
             # Check if palm is open (all fingers extended)
-            if self._is_palm_open(hand_landmarks):
+            is_open, finger_count = self._is_palm_open(hand_landmarks)
+            self.logger.debug(f"Hand {hand_idx}: extended_fingers={finger_count}/5, is_open={is_open}")
+            
+            if is_open:
                 self.logger.debug(
                     f"Open palm detected: hand={hand_label}, confidence={confidence:.2f}"
                 )
-                return True, confidence, num_hands
+                return True, confidence, num_hands, results
         
-        return False, 0.0, num_hands
+        return False, 0.0, num_hands, results
     
-    def _is_palm_open(self, hand_landmarks) -> bool:
+    def draw_landmarks(self, frame: np.ndarray, results) -> np.ndarray:
+        """Draw hand landmarks on frame for debugging."""
+        if results and results.multi_hand_landmarks:
+            mp_drawing = mp.solutions.drawing_utils
+            mp_drawing_styles = mp.solutions.drawing_styles
+            
+            annotated = frame.copy()
+            for hand_landmarks in results.multi_hand_landmarks:
+                mp_drawing.draw_landmarks(
+                    annotated,
+                    hand_landmarks,
+                    self.mp_hands.HAND_CONNECTIONS,
+                    mp_drawing_styles.get_default_hand_landmarks_style(),
+                    mp_drawing_styles.get_default_hand_connections_style()
+                )
+            return annotated
+        return frame
+    
+    def _is_palm_open(self, hand_landmarks) -> Tuple[bool, int]:
         """
         Determine if the palm is open based on finger positions.
         
@@ -370,24 +403,31 @@ class PalmDetector:
         - Ring: 13-16
         - Pinky: 17-20
         - Wrist: 0
+        
+        Returns:
+            Tuple of (is_open, extended_finger_count)
         """
         landmarks = hand_landmarks.landmark
         
         # Finger tip and PIP (or IP for thumb) indices
         finger_tips = [8, 12, 16, 20]  # Index, Middle, Ring, Pinky tips
         finger_pips = [6, 10, 14, 18]  # Corresponding PIP joints
+        finger_names = ['Index', 'Middle', 'Ring', 'Pinky']
         
         extended_count = 0
+        finger_states = []
         
         # Check each finger (except thumb)
-        for tip_idx, pip_idx in zip(finger_tips, finger_pips):
+        for i, (tip_idx, pip_idx) in enumerate(zip(finger_tips, finger_pips)):
             tip = landmarks[tip_idx]
             pip = landmarks[pip_idx]
             
             # Finger is extended if tip is above (lower y value) PIP joint
             # Note: In image coordinates, y increases downward
-            if tip.y < pip.y:
+            extended = tip.y < pip.y
+            if extended:
                 extended_count += 1
+            finger_states.append(f"{finger_names[i]}:{'Y' if extended else 'N'}")
         
         # Check thumb separately
         # Thumb is extended if tip is away from palm center
@@ -401,16 +441,16 @@ class PalmDetector:
         
         if thumb_extended:
             extended_count += 1
+        finger_states.insert(0, f"Thumb:{'Y' if thumb_extended else 'N'}")
         
         # Palm is considered open if at least 4 fingers are extended
         is_open = extended_count >= 4
         
         self.logger.debug(
-            f"Finger check: {extended_count}/5 extended, thumb_extended={thumb_extended}, "
-            f"is_open={is_open}"
+            f"Fingers: [{', '.join(finger_states)}] = {extended_count}/5, is_open={is_open}"
         )
         
-        return is_open
+        return is_open, extended_count
     
     def close(self):
         """Release MediaPipe resources."""
@@ -835,6 +875,11 @@ class PalmDetectionService:
         self.running = False
         self.stop_event = Event()
         
+        # Debug frame saving
+        self.last_debug_save = 0.0
+        if config.debug_save_frames:
+            self.logger.info(f"Debug frame saving enabled: {config.debug_frame_path}")
+        
         # Statistics
         self.stats = {
             'frames_processed': 0,
@@ -930,7 +975,7 @@ class PalmDetectionService:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
                 # Detect palm
-                palm_detected, confidence, num_hands = self.detector.detect_open_palm(frame_rgb)
+                palm_detected, confidence, num_hands, detection_results = self.detector.detect_open_palm(frame_rgb)
                 
                 self.stats['frames_processed'] += 1
                 
@@ -950,6 +995,10 @@ class PalmDetectionService:
                             f"MQTT event sent! Total events: {self.stats['events_sent']}"
                         )
                 
+                # Save debug frames if enabled
+                if self.config.debug_save_frames:
+                    self._save_debug_frame(frame, frame_rgb, detection_results, palm_detected)
+                
                 # Log frame stats periodically
                 if self.config.log_frame_stats and self.stats['frames_processed'] % 100 == 0:
                     self._log_stats()
@@ -960,6 +1009,72 @@ class PalmDetectionService:
         
         self.logger.info("Processing loop ended")
         self._log_stats()
+    
+    def _save_debug_frame(self, original_frame: np.ndarray, processed_frame: np.ndarray, 
+                          detection_results, palm_detected: bool):
+        """Save debug frames periodically for troubleshooting."""
+        current_time = time.time()
+        
+        # Only save at configured interval
+        if current_time - self.last_debug_save < self.config.debug_save_interval:
+            return
+        
+        self.last_debug_save = current_time
+        
+        try:
+            # Create debug directory if it doesn't exist
+            os.makedirs(self.config.debug_frame_path, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            # Save original frame
+            original_path = os.path.join(
+                self.config.debug_frame_path, 
+                f"original_{timestamp}.jpg"
+            )
+            cv2.imwrite(original_path, original_frame)
+            
+            # Save preprocessed frame (convert RGB back to BGR for saving)
+            processed_bgr = cv2.cvtColor(processed_frame, cv2.COLOR_RGB2BGR)
+            processed_path = os.path.join(
+                self.config.debug_frame_path, 
+                f"processed_{timestamp}.jpg"
+            )
+            cv2.imwrite(processed_path, processed_bgr)
+            
+            # Save annotated frame with landmarks if detection occurred
+            if detection_results and detection_results.multi_hand_landmarks:
+                annotated = self.detector.draw_landmarks(processed_frame, detection_results)
+                annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
+                annotated_path = os.path.join(
+                    self.config.debug_frame_path, 
+                    f"annotated_{timestamp}.jpg"
+                )
+                cv2.imwrite(annotated_path, annotated_bgr)
+                self.logger.info(f"Debug frames saved: {timestamp} (with landmarks)")
+            else:
+                self.logger.info(f"Debug frames saved: {timestamp} (no hands detected)")
+            
+            # Keep only the last 20 sets of debug frames
+            self._cleanup_debug_frames()
+            
+        except Exception as e:
+            self.logger.error(f"Failed to save debug frame: {e}")
+    
+    def _cleanup_debug_frames(self):
+        """Remove old debug frames to prevent disk fill."""
+        try:
+            import glob
+            pattern = os.path.join(self.config.debug_frame_path, "*.jpg")
+            files = sorted(glob.glob(pattern), key=os.path.getmtime)
+            
+            # Keep only the last 60 files (20 sets of 3 images)
+            max_files = 60
+            if len(files) > max_files:
+                for f in files[:-max_files]:
+                    os.remove(f)
+        except Exception as e:
+            self.logger.debug(f"Debug frame cleanup error: {e}")
     
     def _log_stats(self):
         """Log current statistics."""
