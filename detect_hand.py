@@ -85,6 +85,11 @@ class Config:
     arm_raised_threshold: float
     require_both_arms: bool
     
+    # Pose Validation
+    min_pose_height_ratio: float
+    min_landmark_visibility: float
+    validate_pose_anatomy: bool
+    
     # ROI Configuration
     roi_enabled: bool
     roi_zones: List[ROIZone]
@@ -182,6 +187,9 @@ class Config:
             gesture_type=get_value('gesture_type', 'GESTURE_TYPE', 'arm_raised'),
             arm_raised_threshold=get_value('arm_raised_threshold', 'ARM_RAISED_THRESHOLD', 0.15, float),
             require_both_arms=get_value('require_both_arms', 'REQUIRE_BOTH_ARMS', False, bool),
+            min_pose_height_ratio=get_value('min_pose_height_ratio', 'MIN_POSE_HEIGHT_RATIO', 0.15, float),
+            min_landmark_visibility=get_value('min_landmark_visibility', 'MIN_LANDMARK_VISIBILITY', 0.5, float),
+            validate_pose_anatomy=get_value('validate_pose_anatomy', 'VALIDATE_POSE_ANATOMY', True, bool),
             roi_enabled=get_value('roi_enabled', 'ROI_ENABLED', False, bool),
             roi_zones=roi_zones,
             frame_skip=get_value('frame_skip', 'FRAME_SKIP', 2, int),
@@ -349,6 +357,12 @@ class GestureDetector:
         
         landmarks = results.pose_landmarks.landmark
         
+        # Validate pose to filter false positives (like cars)
+        is_valid, validation_details = self._validate_pose(landmarks, frame_rgb.shape)
+        if not is_valid:
+            self.logger.debug(f"Pose rejected: {validation_details}")
+            return False, {'persons': 0, 'rejected': validation_details}, results
+        
         # Get key landmark positions
         nose = landmarks[self.NOSE]
         left_shoulder = landmarks[self.LEFT_SHOULDER]
@@ -359,14 +373,17 @@ class GestureDetector:
         right_elbow = landmarks[self.RIGHT_ELBOW]
         
         # Calculate visibility
+        min_vis = self.config.min_landmark_visibility
         pose_visible = (
-            nose.visibility > 0.5 and
-            (left_shoulder.visibility > 0.3 or right_shoulder.visibility > 0.3)
+            nose.visibility > min_vis and
+            (left_shoulder.visibility > min_vis * 0.6 or right_shoulder.visibility > min_vis * 0.6)
         )
         
         if not pose_visible:
             self.logger.debug(f"Pose detected but low visibility: nose={nose.visibility:.2f}")
             return False, {'persons': 1, 'visibility': 'low'}, results
+        
+        self.logger.debug(f"Valid pose detected: nose_vis={nose.visibility:.2f}, validation={validation_details}")
         
         # Check gesture based on type
         if self.config.gesture_type == 'arm_raised':
@@ -384,7 +401,92 @@ class GestureDetector:
             details = {'error': f'Unknown gesture type: {self.config.gesture_type}'}
         
         details['persons'] = 1
+        details['validation'] = validation_details
         return detected, details, results
+    
+    def _validate_pose(self, landmarks, frame_shape) -> Tuple[bool, Dict[str, Any]]:
+        """
+        Validate that detected pose looks like a real person.
+        Filters out false positives from objects like cars.
+        
+        Checks:
+        1. Pose has reasonable height (not too small/compressed)
+        2. Key landmarks are visible
+        3. Anatomical structure makes sense (head above shoulders above hips)
+        """
+        details = {}
+        
+        nose = landmarks[self.NOSE]
+        left_shoulder = landmarks[self.LEFT_SHOULDER]
+        right_shoulder = landmarks[self.RIGHT_SHOULDER]
+        left_hip = landmarks[self.LEFT_HIP]
+        right_hip = landmarks[self.RIGHT_HIP]
+        
+        # Check 1: Pose height ratio
+        # Calculate vertical extent of the pose
+        all_y = [lm.y for lm in landmarks if lm.visibility > 0.3]
+        if len(all_y) < 5:
+            details['reason'] = 'too_few_visible_landmarks'
+            details['visible_count'] = len(all_y)
+            return False, details
+        
+        min_y = min(all_y)
+        max_y = max(all_y)
+        pose_height = max_y - min_y
+        
+        details['pose_height_ratio'] = pose_height
+        
+        if pose_height < self.config.min_pose_height_ratio:
+            details['reason'] = 'pose_too_small'
+            details['required'] = self.config.min_pose_height_ratio
+            return False, details
+        
+        # Check 2: Key landmark visibility
+        key_landmarks_visible = (
+            nose.visibility > self.config.min_landmark_visibility * 0.8 and
+            (left_shoulder.visibility > self.config.min_landmark_visibility * 0.5 or 
+             right_shoulder.visibility > self.config.min_landmark_visibility * 0.5)
+        )
+        
+        details['nose_visibility'] = nose.visibility
+        details['left_shoulder_visibility'] = left_shoulder.visibility
+        details['right_shoulder_visibility'] = right_shoulder.visibility
+        
+        if not key_landmarks_visible:
+            details['reason'] = 'key_landmarks_not_visible'
+            return False, details
+        
+        # Check 3: Anatomical validation (if enabled)
+        if self.config.validate_pose_anatomy:
+            # Head should be above shoulders
+            avg_shoulder_y = (left_shoulder.y + right_shoulder.y) / 2
+            head_above_shoulders = nose.y < avg_shoulder_y
+            
+            # Shoulders should be above hips (for standing person)
+            avg_hip_y = (left_hip.y + right_hip.y) / 2
+            shoulders_above_hips = avg_shoulder_y < avg_hip_y
+            
+            # Shoulder width should be reasonable compared to height
+            shoulder_width = abs(left_shoulder.x - right_shoulder.x)
+            width_height_ratio = shoulder_width / pose_height if pose_height > 0 else 0
+            
+            details['head_above_shoulders'] = head_above_shoulders
+            details['shoulders_above_hips'] = shoulders_above_hips
+            details['width_height_ratio'] = width_height_ratio
+            
+            # A real person standing should have head above shoulders
+            if not head_above_shoulders:
+                details['reason'] = 'head_not_above_shoulders'
+                return False, details
+            
+            # Width/height ratio for a person is typically 0.3-0.8
+            # Cars would have a very different ratio
+            if width_height_ratio > 1.5 or width_height_ratio < 0.1:
+                details['reason'] = 'abnormal_proportions'
+                return False, details
+        
+        details['reason'] = 'valid'
+        return True, details
     
     def _check_arm_raised(self, nose, left_shoulder, right_shoulder,
                           left_wrist, right_wrist, left_elbow, right_elbow) -> Tuple[bool, Dict]:

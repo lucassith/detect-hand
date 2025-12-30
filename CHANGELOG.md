@@ -2,6 +2,18 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.1] - 2025-12-30
+
+### Added
+- **Pose validation** to filter false positives (like cars detected as people)
+- New settings: `min_pose_height_ratio`, `min_landmark_visibility`, `validate_pose_anatomy`
+- Anatomical checks: head above shoulders, reasonable body proportions
+- Detailed validation logging in debug mode
+
+### Fixed
+- False positives on objects like cars that MediaPipe incorrectly detects as humans
+- Better filtering of low-quality pose detections
+
 ## [1.1.0] - 2025-12-30
 
 ### Changed
