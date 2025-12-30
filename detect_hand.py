@@ -34,7 +34,7 @@ import paho.mqtt.client as mqtt
 
 @dataclass
 class Config:
-    """Configuration loaded from environment variables."""
+    """Configuration loaded from Home Assistant options.json or environment variables."""
     
     # RTSP Configuration
     rtsp_url: str
@@ -75,33 +75,73 @@ class Config:
     mqtt_reconnect_delay_seconds: int
 
     @classmethod
-    def from_env(cls) -> 'Config':
-        """Load configuration from environment variables."""
+    def load(cls) -> 'Config':
+        """
+        Load configuration from Home Assistant options.json file.
+        Falls back to environment variables if file not found.
+        """
+        options = {}
+        options_path = '/data/options.json'
+        
+        # Try to load from Home Assistant options.json
+        if os.path.exists(options_path):
+            try:
+                with open(options_path, 'r') as f:
+                    options = json.load(f)
+                print(f"Configuration loaded from {options_path}")
+            except Exception as e:
+                print(f"Warning: Could not load {options_path}: {e}")
+                print("Falling back to environment variables")
+        else:
+            print(f"Options file not found at {options_path}, using environment variables")
+        
+        # Helper to get value from options or env with default
+        def get_value(key: str, env_key: str, default, value_type=str):
+            # First try options.json (keys use underscores)
+            if key in options:
+                val = options[key]
+                # Handle boolean conversion
+                if value_type == bool:
+                    if isinstance(val, bool):
+                        return val
+                    return str(val).lower() == 'true'
+                return value_type(val)
+            
+            # Fall back to environment variable
+            env_val = os.environ.get(env_key)
+            if env_val is not None:
+                if value_type == bool:
+                    return env_val.lower() == 'true'
+                return value_type(env_val)
+            
+            # Return default
+            return default
+        
         return cls(
-            rtsp_url=os.environ.get('RTSP_URL', ''),
-            mqtt_host=os.environ.get('MQTT_HOST', 'core-mosquitto'),
-            mqtt_port=int(os.environ.get('MQTT_PORT', '1883')),
-            mqtt_username=os.environ.get('MQTT_USERNAME', ''),
-            mqtt_password=os.environ.get('MQTT_PASSWORD', ''),
-            mqtt_topic=os.environ.get('MQTT_TOPIC', 'home/gesture/detect-hand'),
-            detection_duration_seconds=float(os.environ.get('DETECTION_DURATION_SECONDS', '4.0')),
-            detection_threshold_percent=int(os.environ.get('DETECTION_THRESHOLD_PERCENT', '80')),
-            cooldown_seconds=float(os.environ.get('COOLDOWN_SECONDS', '5.0')),
-            confidence_threshold=float(os.environ.get('CONFIDENCE_THRESHOLD', '0.5')),
-            frame_skip=int(os.environ.get('FRAME_SKIP', '2')),
-            max_frame_width=int(os.environ.get('MAX_FRAME_WIDTH', '640')),
-            processing_fps=int(os.environ.get('PROCESSING_FPS', '10')),
-            ir_mode_enabled=os.environ.get('IR_MODE_ENABLED', 'true').lower() == 'true',
-            clahe_clip_limit=float(os.environ.get('CLAHE_CLIP_LIMIT', '3.0')),
-            clahe_grid_size=int(os.environ.get('CLAHE_GRID_SIZE', '8')),
-            brightness_boost=float(os.environ.get('BRIGHTNESS_BOOST', '1.2')),
-            contrast_boost=float(os.environ.get('CONTRAST_BOOST', '1.3')),
-            log_level=os.environ.get('LOG_LEVEL', 'INFO'),
-            log_detection_events=os.environ.get('LOG_DETECTION_EVENTS', 'true').lower() == 'true',
-            log_frame_stats=os.environ.get('LOG_FRAME_STATS', 'false').lower() == 'true',
-            rtsp_reconnect_delay_seconds=int(os.environ.get('RTSP_RECONNECT_DELAY_SECONDS', '5')),
-            rtsp_max_reconnect_attempts=int(os.environ.get('RTSP_MAX_RECONNECT_ATTEMPTS', '0')),
-            mqtt_reconnect_delay_seconds=int(os.environ.get('MQTT_RECONNECT_DELAY_SECONDS', '5')),
+            rtsp_url=get_value('rtsp_url', 'RTSP_URL', ''),
+            mqtt_host=get_value('mqtt_host', 'MQTT_HOST', 'core-mosquitto'),
+            mqtt_port=get_value('mqtt_port', 'MQTT_PORT', 1883, int),
+            mqtt_username=get_value('mqtt_username', 'MQTT_USERNAME', ''),
+            mqtt_password=get_value('mqtt_password', 'MQTT_PASSWORD', ''),
+            mqtt_topic=get_value('mqtt_topic', 'MQTT_TOPIC', 'home/gesture/detect-hand'),
+            detection_duration_seconds=get_value('detection_duration_seconds', 'DETECTION_DURATION_SECONDS', 4.0, float),
+            detection_threshold_percent=get_value('detection_threshold_percent', 'DETECTION_THRESHOLD_PERCENT', 80, int),
+            cooldown_seconds=get_value('cooldown_seconds', 'COOLDOWN_SECONDS', 5.0, float),
+            confidence_threshold=get_value('confidence_threshold', 'CONFIDENCE_THRESHOLD', 0.5, float),
+            frame_skip=get_value('frame_skip', 'FRAME_SKIP', 2, int),
+            max_frame_width=get_value('max_frame_width', 'MAX_FRAME_WIDTH', 640, int),
+            processing_fps=get_value('processing_fps', 'PROCESSING_FPS', 10, int),
+            ir_mode_enabled=get_value('ir_mode_enabled', 'IR_MODE_ENABLED', True, bool),
+            clahe_clip_limit=get_value('clahe_clip_limit', 'CLAHE_CLIP_LIMIT', 3.0, float),
+            clahe_grid_size=get_value('clahe_grid_size', 'CLAHE_GRID_SIZE', 8, int),
+            brightness_boost=get_value('brightness_boost', 'BRIGHTNESS_BOOST', 1.2, float),
+            contrast_boost=get_value('contrast_boost', 'CONTRAST_BOOST', 1.3, float),
+            log_level=get_value('log_level', 'LOG_LEVEL', 'INFO'),
+            log_detection_events=get_value('log_detection_events', 'LOG_DETECTION_EVENTS', True, bool),
+            log_frame_stats=get_value('log_frame_stats', 'LOG_FRAME_STATS', False, bool),
+            rtsp_reconnect_delay_seconds=get_value('rtsp_reconnect_delay_seconds', 'RTSP_RECONNECT_DELAY_SECONDS', 5, int),
+            rtsp_max_reconnect_attempts=get_value('rtsp_max_reconnect_attempts', 'RTSP_MAX_RECONNECT_ATTEMPTS', 0, int),
+            mqtt_reconnect_delay_seconds=get_value('mqtt_reconnect_delay_seconds', 'MQTT_RECONNECT_DELAY_SECONDS', 5, int),
         )
 
 
@@ -944,7 +984,7 @@ class PalmDetectionService:
 def main():
     """Main entry point."""
     # Load configuration
-    config = Config.from_env()
+    config = Config.load()
     
     # Validate required configuration
     if not config.rtsp_url:
