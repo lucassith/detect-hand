@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-Open Palm Detection Add-on for Home Assistant
+Gesture Detection Add-on for Home Assistant
 
-Detects open palm gestures from RTSP camera stream (including IR/low-light)
-and sends MQTT events when palm is shown for configured duration.
+Detects raised arm gestures from RTSP camera stream (including IR/low-light)
+and sends MQTT events when gesture is held for configured duration.
+
+Uses MediaPipe Pose for full-body pose detection, which works at longer distances
+than hand detection.
 
 Author: Home Assistant Add-on
-Version: 1.0.0
+Version: 1.1.0
 """
 
 import os
@@ -18,9 +21,9 @@ import logging
 import signal
 from collections import deque
 from datetime import datetime, timedelta
-from typing import Optional, Tuple, Dict, Any
-from dataclasses import dataclass
-from threading import Thread, Event, Lock
+from typing import Optional, Tuple, Dict, Any, List
+from dataclasses import dataclass, field
+from threading import Event, Lock
 
 import cv2
 import numpy as np
@@ -31,17 +34,11 @@ try:
     import mediapipe as mp
     print(f"MediaPipe imported from: {mp.__file__}")
     print(f"MediaPipe version: {mp.__version__}")
-    print(f"MediaPipe has solutions: {hasattr(mp, 'solutions')}")
     
-    # Try direct import if solutions attribute missing
-    if not hasattr(mp, 'solutions'):
-        print("Trying direct import of mediapipe.python.solutions...")
-        from mediapipe.python.solutions import hands as mp_hands_module
-        # Create a namespace object to hold solutions
-        class Solutions:
-            hands = mp_hands_module
-        mp.solutions = Solutions()
-        print("Direct import successful, patched mp.solutions")
+    # Verify pose solution is available
+    from mediapipe.python.solutions import pose as mp_pose
+    from mediapipe.python.solutions import drawing_utils as mp_drawing
+    print("MediaPipe Pose module loaded successfully")
 except Exception as e:
     print(f"MediaPipe import error: {e}")
     import traceback
@@ -52,6 +49,16 @@ except Exception as e:
 # =============================================================================
 # Configuration
 # =============================================================================
+
+@dataclass
+class ROIZone:
+    """Region of Interest zone definition."""
+    name: str
+    x1: int  # Percentage 0-100
+    y1: int
+    x2: int
+    y2: int
+
 
 @dataclass
 class Config:
@@ -72,6 +79,15 @@ class Config:
     detection_threshold_percent: int
     cooldown_seconds: float
     confidence_threshold: float
+    
+    # Gesture Configuration
+    gesture_type: str
+    arm_raised_threshold: float
+    require_both_arms: bool
+    
+    # ROI Configuration
+    roi_enabled: bool
+    roi_zones: List[ROIZone]
     
     # Performance Configuration
     frame_skip: int
@@ -123,25 +139,34 @@ class Config:
         
         # Helper to get value from options or env with default
         def get_value(key: str, env_key: str, default, value_type=str):
-            # First try options.json (keys use underscores)
             if key in options:
                 val = options[key]
-                # Handle boolean conversion
                 if value_type == bool:
                     if isinstance(val, bool):
                         return val
                     return str(val).lower() == 'true'
                 return value_type(val)
             
-            # Fall back to environment variable
             env_val = os.environ.get(env_key)
             if env_val is not None:
                 if value_type == bool:
                     return env_val.lower() == 'true'
                 return value_type(env_val)
             
-            # Return default
             return default
+        
+        # Parse ROI zones
+        roi_zones = []
+        raw_zones = options.get('roi_zones', [])
+        for zone in raw_zones:
+            if isinstance(zone, dict):
+                roi_zones.append(ROIZone(
+                    name=zone.get('name', 'unnamed'),
+                    x1=zone.get('x1', 0),
+                    y1=zone.get('y1', 0),
+                    x2=zone.get('x2', 100),
+                    y2=zone.get('y2', 100),
+                ))
         
         return cls(
             rtsp_url=get_value('rtsp_url', 'RTSP_URL', ''),
@@ -153,11 +178,16 @@ class Config:
             detection_duration_seconds=get_value('detection_duration_seconds', 'DETECTION_DURATION_SECONDS', 4.0, float),
             detection_threshold_percent=get_value('detection_threshold_percent', 'DETECTION_THRESHOLD_PERCENT', 80, int),
             cooldown_seconds=get_value('cooldown_seconds', 'COOLDOWN_SECONDS', 5.0, float),
-            confidence_threshold=get_value('confidence_threshold', 'CONFIDENCE_THRESHOLD', 0.5, float),
+            confidence_threshold=get_value('confidence_threshold', 'CONFIDENCE_THRESHOLD', 0.3, float),
+            gesture_type=get_value('gesture_type', 'GESTURE_TYPE', 'arm_raised'),
+            arm_raised_threshold=get_value('arm_raised_threshold', 'ARM_RAISED_THRESHOLD', 0.15, float),
+            require_both_arms=get_value('require_both_arms', 'REQUIRE_BOTH_ARMS', False, bool),
+            roi_enabled=get_value('roi_enabled', 'ROI_ENABLED', False, bool),
+            roi_zones=roi_zones,
             frame_skip=get_value('frame_skip', 'FRAME_SKIP', 2, int),
-            max_frame_width=get_value('max_frame_width', 'MAX_FRAME_WIDTH', 640, int),
+            max_frame_width=get_value('max_frame_width', 'MAX_FRAME_WIDTH', 1280, int),
             processing_fps=get_value('processing_fps', 'PROCESSING_FPS', 10, int),
-            ir_mode_enabled=get_value('ir_mode_enabled', 'IR_MODE_ENABLED', True, bool),
+            ir_mode_enabled=get_value('ir_mode_enabled', 'IR_MODE_ENABLED', False, bool),
             clahe_clip_limit=get_value('clahe_clip_limit', 'CLAHE_CLIP_LIMIT', 3.0, float),
             clahe_grid_size=get_value('clahe_grid_size', 'CLAHE_GRID_SIZE', 8, int),
             brightness_boost=get_value('brightness_boost', 'BRIGHTNESS_BOOST', 1.2, float),
@@ -182,15 +212,12 @@ def setup_logging(config: Config) -> logging.Logger:
     """Set up logging with the configured level."""
     log_level = getattr(logging, config.log_level.upper(), logging.INFO)
     
-    # Create logger
-    logger = logging.getLogger('palm_detection')
+    logger = logging.getLogger('gesture_detection')
     logger.setLevel(log_level)
     
-    # Create handler with format
     handler = logging.StreamHandler(sys.stdout)
     handler.setLevel(log_level)
     
-    # Format includes timestamp for debugging
     formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
@@ -207,29 +234,19 @@ def setup_logging(config: Config) -> logging.Logger:
 # =============================================================================
 
 def extract_channel_from_url(rtsp_url: str) -> str:
-    """
-    Extract channel number from RTSP URL.
-    
-    Examples:
-        rtsp://user:pass@192.168.1.7/ISAPI/Streaming/channels/101 -> "101"
-        rtsp://user:pass@192.168.1.7/cam/realmonitor?channel=2 -> "2"
-    """
-    # Try to match /channels/XXX pattern (Hikvision style)
+    """Extract channel number from RTSP URL."""
     match = re.search(r'/channels/(\d+)', rtsp_url)
     if match:
         return match.group(1)
     
-    # Try to match channel=XXX query parameter
     match = re.search(r'[?&]channel=(\d+)', rtsp_url)
     if match:
         return match.group(1)
     
-    # Try to match /ch(\d+) pattern
     match = re.search(r'/ch(\d+)', rtsp_url)
     if match:
         return match.group(1)
     
-    # Default to "unknown" if no pattern matches
     return "unknown"
 
 
@@ -244,7 +261,6 @@ class IRPreprocessor:
         self.config = config
         self.logger = logger
         
-        # Create CLAHE object for contrast enhancement
         self.clahe = cv2.createCLAHE(
             clipLimit=config.clahe_clip_limit,
             tileGridSize=(config.clahe_grid_size, config.clahe_grid_size)
@@ -257,26 +273,14 @@ class IRPreprocessor:
         )
     
     def preprocess(self, frame: np.ndarray) -> np.ndarray:
-        """
-        Preprocess frame for better palm detection in IR/low-light conditions.
-        
-        Args:
-            frame: Input frame (BGR or grayscale)
-            
-        Returns:
-            Preprocessed frame in RGB format (required by MediaPipe)
-        """
-        # Convert to grayscale if not already
+        """Preprocess frame for better detection in IR/low-light conditions."""
         if len(frame.shape) == 3:
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         else:
             gray = frame.copy()
         
-        # Apply CLAHE for adaptive contrast enhancement
         enhanced = self.clahe.apply(gray)
         
-        # Apply brightness and contrast adjustments
-        # Formula: output = contrast * input + brightness_offset
         brightness_offset = int((self.config.brightness_boost - 1.0) * 128)
         enhanced = cv2.convertScaleAbs(
             enhanced, 
@@ -284,178 +288,190 @@ class IRPreprocessor:
             beta=brightness_offset
         )
         
-        # Convert back to RGB (MediaPipe requires RGB input)
         rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
         
         return rgb
+
+
+# =============================================================================
+# Pose/Gesture Detection
+# =============================================================================
+
+class GestureDetector:
+    """Detects gestures using MediaPipe Pose."""
     
-    def update_clahe(self, clip_limit: float, grid_size: int):
-        """Update CLAHE parameters dynamically."""
-        self.clahe = cv2.createCLAHE(
-            clipLimit=clip_limit,
-            tileGridSize=(grid_size, grid_size)
-        )
-        self.logger.info(f"CLAHE updated: clip={clip_limit}, grid={grid_size}")
-
-
-# =============================================================================
-# Palm Detection
-# =============================================================================
-
-class PalmDetector:
-    """Detects open palm gestures using MediaPipe."""
+    # MediaPipe Pose landmark indices
+    NOSE = 0
+    LEFT_SHOULDER = 11
+    RIGHT_SHOULDER = 12
+    LEFT_ELBOW = 13
+    RIGHT_ELBOW = 14
+    LEFT_WRIST = 15
+    RIGHT_WRIST = 16
+    LEFT_HIP = 23
+    RIGHT_HIP = 24
     
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
         
-        # Initialize MediaPipe Hands
-        self.mp_hands = mp.solutions.hands
-        self.hands = self.mp_hands.Hands(
+        # Initialize MediaPipe Pose
+        self.pose = mp_pose.Pose(
             static_image_mode=False,
-            max_num_hands=2,
+            model_complexity=1,  # 0=lite, 1=full, 2=heavy
+            smooth_landmarks=True,
+            enable_segmentation=False,
             min_detection_confidence=config.confidence_threshold,
-            min_tracking_confidence=config.confidence_threshold * 0.8,  # Slightly lower for tracking
+            min_tracking_confidence=config.confidence_threshold * 0.8,
         )
         
         self.logger.info(
-            f"Palm detector initialized: confidence={config.confidence_threshold}, "
-            f"tracking={config.confidence_threshold * 0.8:.2f}"
+            f"Gesture detector initialized: type={config.gesture_type}, "
+            f"confidence={config.confidence_threshold}, "
+            f"arm_threshold={config.arm_raised_threshold}"
         )
     
-    def detect_open_palm(self, frame_rgb: np.ndarray) -> Tuple[bool, float, int, Optional[Any]]:
+    def detect_gesture(self, frame_rgb: np.ndarray) -> Tuple[bool, Dict[str, Any], Optional[Any]]:
         """
-        Detect if an open palm is visible in the frame.
-        
-        An open palm is detected when:
-        1. A hand is detected
-        2. All fingers are extended (fingertips above knuckles)
+        Detect if the configured gesture is visible in the frame.
         
         Args:
             frame_rgb: RGB frame
             
         Returns:
-            Tuple of (is_open_palm, confidence, num_hands, results_for_debug)
+            Tuple of (gesture_detected, details_dict, pose_results)
         """
-        results = self.hands.process(frame_rgb)
+        results = self.pose.process(frame_rgb)
         
-        if not results.multi_hand_landmarks:
-            self.logger.debug("No hands detected in frame")
-            return False, 0.0, 0, results
+        if not results.pose_landmarks:
+            self.logger.debug("No person/pose detected in frame")
+            return False, {'persons': 0}, results
         
-        num_hands = len(results.multi_hand_landmarks)
-        self.logger.debug(f"Detected {num_hands} hand(s) in frame")
+        landmarks = results.pose_landmarks.landmark
         
-        for hand_idx, hand_landmarks in enumerate(results.multi_hand_landmarks):
-            # Get handedness info if available
-            if results.multi_handedness:
-                hand_info = results.multi_handedness[hand_idx]
-                hand_label = hand_info.classification[0].label
-                confidence = hand_info.classification[0].score
-            else:
-                hand_label = "Unknown"
-                confidence = 0.5
-            
-            self.logger.debug(f"Hand {hand_idx}: label={hand_label}, confidence={confidence:.2f}")
-            
-            # Check if palm is open (all fingers extended)
-            is_open, finger_count = self._is_palm_open(hand_landmarks)
-            self.logger.debug(f"Hand {hand_idx}: extended_fingers={finger_count}/5, is_open={is_open}")
-            
-            if is_open:
-                self.logger.debug(
-                    f"Open palm detected: hand={hand_label}, confidence={confidence:.2f}"
-                )
-                return True, confidence, num_hands, results
+        # Get key landmark positions
+        nose = landmarks[self.NOSE]
+        left_shoulder = landmarks[self.LEFT_SHOULDER]
+        right_shoulder = landmarks[self.RIGHT_SHOULDER]
+        left_wrist = landmarks[self.LEFT_WRIST]
+        right_wrist = landmarks[self.RIGHT_WRIST]
+        left_elbow = landmarks[self.LEFT_ELBOW]
+        right_elbow = landmarks[self.RIGHT_ELBOW]
         
-        return False, 0.0, num_hands, results
+        # Calculate visibility
+        pose_visible = (
+            nose.visibility > 0.5 and
+            (left_shoulder.visibility > 0.3 or right_shoulder.visibility > 0.3)
+        )
+        
+        if not pose_visible:
+            self.logger.debug(f"Pose detected but low visibility: nose={nose.visibility:.2f}")
+            return False, {'persons': 1, 'visibility': 'low'}, results
+        
+        # Check gesture based on type
+        if self.config.gesture_type == 'arm_raised':
+            detected, details = self._check_arm_raised(
+                nose, left_shoulder, right_shoulder,
+                left_wrist, right_wrist, left_elbow, right_elbow
+            )
+        elif self.config.gesture_type == 'both_arms_raised':
+            detected, details = self._check_both_arms_raised(
+                nose, left_shoulder, right_shoulder,
+                left_wrist, right_wrist
+            )
+        else:
+            detected = False
+            details = {'error': f'Unknown gesture type: {self.config.gesture_type}'}
+        
+        details['persons'] = 1
+        return detected, details, results
+    
+    def _check_arm_raised(self, nose, left_shoulder, right_shoulder,
+                          left_wrist, right_wrist, left_elbow, right_elbow) -> Tuple[bool, Dict]:
+        """
+        Check if at least one arm is raised above the head.
+        
+        An arm is considered raised if:
+        - Wrist is above the nose (y coordinate is lower in image coords)
+        - With some threshold to account for detection noise
+        """
+        threshold = self.config.arm_raised_threshold
+        
+        # Calculate if wrists are above nose
+        # In image coordinates, y=0 is top, so "above" means lower y value
+        left_raised = (nose.y - left_wrist.y) > threshold
+        right_raised = (nose.y - right_wrist.y) > threshold
+        
+        # Also check if elbow is above shoulder (arm is actually up, not just wrist position)
+        left_elbow_up = left_elbow.y < left_shoulder.y
+        right_elbow_up = right_elbow.y < right_shoulder.y
+        
+        # Arm is truly raised if wrist above nose AND elbow above shoulder
+        left_arm_raised = left_raised and left_elbow_up and left_wrist.visibility > 0.3
+        right_arm_raised = right_raised and right_elbow_up and right_wrist.visibility > 0.3
+        
+        details = {
+            'left_wrist_y': left_wrist.y,
+            'right_wrist_y': right_wrist.y,
+            'nose_y': nose.y,
+            'left_raised': left_arm_raised,
+            'right_raised': right_arm_raised,
+            'left_wrist_visibility': left_wrist.visibility,
+            'right_wrist_visibility': right_wrist.visibility,
+        }
+        
+        detected = left_arm_raised or right_arm_raised
+        
+        self.logger.debug(
+            f"Arm check: L_raised={left_arm_raised}, R_raised={right_arm_raised}, "
+            f"nose_y={nose.y:.3f}, L_wrist_y={left_wrist.y:.3f}, R_wrist_y={right_wrist.y:.3f}"
+        )
+        
+        return detected, details
+    
+    def _check_both_arms_raised(self, nose, left_shoulder, right_shoulder,
+                                 left_wrist, right_wrist) -> Tuple[bool, Dict]:
+        """Check if both arms are raised above shoulders."""
+        threshold = self.config.arm_raised_threshold
+        
+        left_raised = (left_shoulder.y - left_wrist.y) > threshold
+        right_raised = (right_shoulder.y - right_wrist.y) > threshold
+        
+        details = {
+            'left_raised': left_raised,
+            'right_raised': right_raised,
+        }
+        
+        detected = left_raised and right_raised
+        
+        self.logger.debug(
+            f"Both arms check: L={left_raised}, R={right_raised}"
+        )
+        
+        return detected, details
     
     def draw_landmarks(self, frame: np.ndarray, results) -> np.ndarray:
-        """Draw hand landmarks on frame for debugging."""
-        if results and results.multi_hand_landmarks:
-            mp_drawing = mp.solutions.drawing_utils
-            mp_drawing_styles = mp.solutions.drawing_styles
-            
+        """Draw pose landmarks on frame for debugging."""
+        if results and results.pose_landmarks:
             annotated = frame.copy()
-            for hand_landmarks in results.multi_hand_landmarks:
-                mp_drawing.draw_landmarks(
-                    annotated,
-                    hand_landmarks,
-                    self.mp_hands.HAND_CONNECTIONS,
-                    mp_drawing_styles.get_default_hand_landmarks_style(),
-                    mp_drawing_styles.get_default_hand_connections_style()
+            mp_drawing.draw_landmarks(
+                annotated,
+                results.pose_landmarks,
+                mp_pose.POSE_CONNECTIONS,
+                landmark_drawing_spec=mp_drawing.DrawingSpec(
+                    color=(0, 255, 0), thickness=2, circle_radius=3
+                ),
+                connection_drawing_spec=mp_drawing.DrawingSpec(
+                    color=(255, 0, 0), thickness=2
                 )
+            )
             return annotated
         return frame
     
-    def _is_palm_open(self, hand_landmarks) -> Tuple[bool, int]:
-        """
-        Determine if the palm is open based on finger positions.
-        
-        For an open palm:
-        - All finger tips should be extended (above their respective PIP joints)
-        - Thumb tip should be away from the palm
-        
-        Landmark indices:
-        - Thumb: 1-4 (CMC, MCP, IP, TIP)
-        - Index: 5-8 (MCP, PIP, DIP, TIP)
-        - Middle: 9-12
-        - Ring: 13-16
-        - Pinky: 17-20
-        - Wrist: 0
-        
-        Returns:
-            Tuple of (is_open, extended_finger_count)
-        """
-        landmarks = hand_landmarks.landmark
-        
-        # Finger tip and PIP (or IP for thumb) indices
-        finger_tips = [8, 12, 16, 20]  # Index, Middle, Ring, Pinky tips
-        finger_pips = [6, 10, 14, 18]  # Corresponding PIP joints
-        finger_names = ['Index', 'Middle', 'Ring', 'Pinky']
-        
-        extended_count = 0
-        finger_states = []
-        
-        # Check each finger (except thumb)
-        for i, (tip_idx, pip_idx) in enumerate(zip(finger_tips, finger_pips)):
-            tip = landmarks[tip_idx]
-            pip = landmarks[pip_idx]
-            
-            # Finger is extended if tip is above (lower y value) PIP joint
-            # Note: In image coordinates, y increases downward
-            extended = tip.y < pip.y
-            if extended:
-                extended_count += 1
-            finger_states.append(f"{finger_names[i]}:{'Y' if extended else 'N'}")
-        
-        # Check thumb separately
-        # Thumb is extended if tip is away from palm center
-        thumb_tip = landmarks[4]
-        thumb_ip = landmarks[3]
-        thumb_mcp = landmarks[2]
-        
-        # For thumb, check if it's extended outward
-        # Compare x distance from MCP to TIP vs MCP to IP
-        thumb_extended = abs(thumb_tip.x - thumb_mcp.x) > abs(thumb_ip.x - thumb_mcp.x) * 0.8
-        
-        if thumb_extended:
-            extended_count += 1
-        finger_states.insert(0, f"Thumb:{'Y' if thumb_extended else 'N'}")
-        
-        # Palm is considered open if at least 4 fingers are extended
-        is_open = extended_count >= 4
-        
-        self.logger.debug(
-            f"Fingers: [{', '.join(finger_states)}] = {extended_count}/5, is_open={is_open}"
-        )
-        
-        return is_open, extended_count
-    
     def close(self):
         """Release MediaPipe resources."""
-        self.hands.close()
-        self.logger.debug("Palm detector closed")
+        self.pose.close()
+        self.logger.debug("Gesture detector closed")
 
 
 # =============================================================================
@@ -463,24 +479,14 @@ class PalmDetector:
 # =============================================================================
 
 class DetectionWindow:
-    """
-    Tracks palm detections over a sliding time window.
-    
-    Determines if palm has been visible for the required duration
-    with the required detection threshold.
-    """
+    """Tracks gesture detections over a sliding time window."""
     
     def __init__(self, config: Config, logger: logging.Logger):
         self.config = config
         self.logger = logger
         
-        # Store timestamps of positive detections
         self.detections: deque = deque()
-        
-        # Cooldown tracking
         self.last_event_time: Optional[datetime] = None
-        
-        # Lock for thread safety
         self.lock = Lock()
         
         self.logger.debug(
@@ -490,29 +496,17 @@ class DetectionWindow:
         )
     
     def add_detection(self, detected: bool, timestamp: Optional[datetime] = None) -> bool:
-        """
-        Add a detection result and check if event should be triggered.
-        
-        Args:
-            detected: Whether palm was detected in this frame
-            timestamp: Detection timestamp (uses current time if None)
-            
-        Returns:
-            True if event should be triggered (threshold met and not in cooldown)
-        """
+        """Add a detection result and check if event should be triggered."""
         if timestamp is None:
             timestamp = datetime.now()
         
         with self.lock:
-            # Add detection with timestamp
             self.detections.append((timestamp, detected))
             
-            # Remove old detections outside the window
             window_start = timestamp - timedelta(seconds=self.config.detection_duration_seconds)
             while self.detections and self.detections[0][0] < window_start:
                 self.detections.popleft()
             
-            # Check if we're in cooldown
             if self.last_event_time:
                 cooldown_end = self.last_event_time + timedelta(seconds=self.config.cooldown_seconds)
                 if timestamp < cooldown_end:
@@ -520,7 +514,6 @@ class DetectionWindow:
                     self.logger.debug(f"In cooldown: {remaining:.1f}s remaining")
                     return False
             
-            # Calculate detection percentage
             if len(self.detections) < 2:
                 return False
             
@@ -533,12 +526,10 @@ class DetectionWindow:
                 f"(threshold: {self.config.detection_threshold_percent}%)"
             )
             
-            # Check if we have enough samples over the duration
-            if total_count >= 2:  # Minimum samples
+            if total_count >= 2:
                 window_duration = (self.detections[-1][0] - self.detections[0][0]).total_seconds()
                 
-                # Only trigger if we've been tracking for at least the detection duration
-                if window_duration >= self.config.detection_duration_seconds * 0.9:  # 90% of duration
+                if window_duration >= self.config.detection_duration_seconds * 0.9:
                     if percentage >= self.config.detection_threshold_percent:
                         self.logger.info(
                             f"Detection threshold met: {percentage:.1f}% over {window_duration:.1f}s"
@@ -601,29 +592,20 @@ class MQTTPublisher:
         self.connected = False
         self.stop_event = Event()
         
-        # Extract channel from RTSP URL
         self.channel = extract_channel_from_url(config.rtsp_url)
         self.logger.info(f"Extracted channel from RTSP URL: {self.channel}")
     
     def connect(self) -> bool:
-        """
-        Connect to MQTT broker.
-        
-        Returns:
-            True if connection successful
-        """
+        """Connect to MQTT broker."""
         try:
-            # Create MQTT client with new callback API
             self.client = mqtt.Client(
                 callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
-                client_id=f"palm_detection_{self.channel}"
+                client_id=f"gesture_detection_{self.channel}"
             )
             
-            # Set callbacks
             self.client.on_connect = self._on_connect
             self.client.on_disconnect = self._on_disconnect
             
-            # Set credentials if provided
             if self.config.mqtt_username:
                 self.client.username_pw_set(
                     self.config.mqtt_username,
@@ -631,7 +613,6 @@ class MQTTPublisher:
                 )
                 self.logger.debug(f"MQTT credentials set for user: {self.config.mqtt_username}")
             
-            # Connect
             self.logger.info(
                 f"Connecting to MQTT broker: {self.config.mqtt_host}:{self.config.mqtt_port}"
             )
@@ -641,10 +622,8 @@ class MQTTPublisher:
                 keepalive=60
             )
             
-            # Start network loop in background
             self.client.loop_start()
             
-            # Wait for connection
             timeout = 10
             start_time = time.time()
             while not self.connected and time.time() - start_time < timeout:
@@ -674,24 +653,22 @@ class MQTTPublisher:
         self.connected = False
         self.logger.warning(f"MQTT disconnected: {reason_code}")
     
-    def publish_palm_event(self) -> bool:
-        """
-        Publish palm detection event to MQTT.
-        
-        Returns:
-            True if publish successful
-        """
+    def publish_gesture_event(self, gesture_type: str = "arm_raised") -> bool:
+        """Publish gesture detection event to MQTT."""
         if not self.client or not self.connected:
             self.logger.error("Cannot publish: MQTT not connected")
             return False
         
         try:
-            payload = json.dumps({"channel": self.channel})
+            payload = json.dumps({
+                "channel": self.channel,
+                "gesture": gesture_type
+            })
             
             result = self.client.publish(
                 self.config.mqtt_topic,
                 payload,
-                qos=1  # At least once delivery
+                qos=1
             )
             
             if result.rc == mqtt.MQTT_ERR_SUCCESS:
@@ -731,34 +708,23 @@ class RTSPStream:
         self.connected = False
         self.reconnect_attempts = 0
         
-        # Frame info
         self.frame_width = 0
         self.frame_height = 0
         self.fps = 0
     
     def connect(self) -> bool:
-        """
-        Connect to RTSP stream.
-        
-        Returns:
-            True if connection successful
-        """
-        # Redact credentials for logging
+        """Connect to RTSP stream."""
         redacted_url = re.sub(r'://[^:]+:[^@]+@', '://[REDACTED]@', self.config.rtsp_url)
         self.logger.info(f"Connecting to RTSP stream: {redacted_url}")
         
         try:
-            # Set OpenCV capture options for RTSP
             self.cap = cv2.VideoCapture(self.config.rtsp_url, cv2.CAP_FFMPEG)
-            
-            # Set buffer size to reduce latency
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
             if not self.cap.isOpened():
                 self.logger.error("Failed to open RTSP stream")
                 return False
             
-            # Get stream info
             self.frame_width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
             self.frame_height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
             self.fps = self.cap.get(cv2.CAP_PROP_FPS)
@@ -776,12 +742,7 @@ class RTSPStream:
             return False
     
     def read_frame(self) -> Optional[np.ndarray]:
-        """
-        Read a frame from the RTSP stream.
-        
-        Returns:
-            Frame as numpy array, or None if read failed
-        """
+        """Read a frame from the RTSP stream."""
         if not self.cap or not self.connected:
             return None
         
@@ -793,7 +754,6 @@ class RTSPStream:
                 self.connected = False
                 return None
             
-            # Resize if needed to save CPU
             if self.frame_width > self.config.max_frame_width:
                 scale = self.config.max_frame_width / self.frame_width
                 new_width = self.config.max_frame_width
@@ -808,29 +768,17 @@ class RTSPStream:
             return None
     
     def reconnect(self) -> bool:
-        """
-        Attempt to reconnect to RTSP stream.
-        
-        Returns:
-            True if reconnection successful
-        """
+        """Attempt to reconnect to RTSP stream."""
         self.reconnect_attempts += 1
         
         max_attempts = self.config.rtsp_max_reconnect_attempts
         if max_attempts > 0 and self.reconnect_attempts > max_attempts:
-            self.logger.error(
-                f"Max reconnect attempts ({max_attempts}) exceeded"
-            )
+            self.logger.error(f"Max reconnect attempts ({max_attempts}) exceeded")
             return False
         
-        self.logger.info(
-            f"Reconnecting to RTSP stream (attempt {self.reconnect_attempts})..."
-        )
+        self.logger.info(f"Reconnecting to RTSP stream (attempt {self.reconnect_attempts})...")
         
-        # Close existing connection
         self.disconnect()
-        
-        # Wait before reconnecting
         time.sleep(self.config.rtsp_reconnect_delay_seconds)
         
         return self.connect()
@@ -848,21 +796,22 @@ class RTSPStream:
 # Main Detection Service
 # =============================================================================
 
-class PalmDetectionService:
-    """Main service orchestrating palm detection."""
+class GestureDetectionService:
+    """Main service orchestrating gesture detection."""
     
     def __init__(self, config: Config):
         self.config = config
         self.logger = setup_logging(config)
         
         self.logger.info("=" * 60)
-        self.logger.info("Open Palm Detection Service Starting")
+        self.logger.info("Gesture Detection Service Starting")
+        self.logger.info(f"Gesture type: {config.gesture_type}")
         self.logger.info("=" * 60)
         
         # Initialize components
         self.rtsp = RTSPStream(config, self.logger)
         self.mqtt = MQTTPublisher(config, self.logger)
-        self.detector = PalmDetector(config, self.logger)
+        self.detector = GestureDetector(config, self.logger)
         self.detection_window = DetectionWindow(config, self.logger)
         
         # IR preprocessor (optional)
@@ -883,7 +832,7 @@ class PalmDetectionService:
         # Statistics
         self.stats = {
             'frames_processed': 0,
-            'palms_detected': 0,
+            'gestures_detected': 0,
             'events_sent': 0,
             'start_time': None,
         }
@@ -901,12 +850,10 @@ class PalmDetectionService:
         """Start the detection service."""
         self.logger.info("Starting detection service...")
         
-        # Connect to MQTT
         if not self.mqtt.connect():
             self.logger.error("Failed to connect to MQTT broker, exiting")
             return False
         
-        # Connect to RTSP
         if not self.rtsp.connect():
             self.logger.error("Failed to connect to RTSP stream, exiting")
             self.mqtt.disconnect()
@@ -915,7 +862,6 @@ class PalmDetectionService:
         self.running = True
         self.stats['start_time'] = datetime.now()
         
-        # Main processing loop
         self._processing_loop()
         
         return True
@@ -933,7 +879,6 @@ class PalmDetectionService:
         
         while self.running and not self.stop_event.is_set():
             try:
-                # Check RTSP connection
                 if not self.rtsp.connected:
                     self.logger.warning("RTSP connection lost, attempting reconnect...")
                     if not self.rtsp.reconnect():
@@ -942,7 +887,6 @@ class PalmDetectionService:
                     self.detection_window.reset()
                     continue
                 
-                # Check MQTT connection
                 if not self.mqtt.connected:
                     self.logger.warning("MQTT connection lost, attempting reconnect...")
                     if not self.mqtt.connect():
@@ -950,21 +894,18 @@ class PalmDetectionService:
                         time.sleep(self.config.mqtt_reconnect_delay_seconds)
                         continue
                 
-                # Rate limiting
                 current_time = time.time()
                 elapsed = current_time - last_process_time
                 if elapsed < frame_interval:
                     time.sleep(frame_interval - elapsed)
                 last_process_time = time.time()
                 
-                # Read frame
                 frame = self.rtsp.read_frame()
                 if frame is None:
                     continue
                 
                 frame_count += 1
                 
-                # Skip frames if configured
                 if self.config.frame_skip > 0 and frame_count % (self.config.frame_skip + 1) != 0:
                     continue
                 
@@ -974,22 +915,19 @@ class PalmDetectionService:
                 else:
                     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 
-                # Detect palm
-                palm_detected, confidence, num_hands, detection_results = self.detector.detect_open_palm(frame_rgb)
+                # Detect gesture
+                gesture_detected, details, detection_results = self.detector.detect_gesture(frame_rgb)
                 
                 self.stats['frames_processed'] += 1
                 
-                if palm_detected:
-                    self.stats['palms_detected'] += 1
+                if gesture_detected:
+                    self.stats['gestures_detected'] += 1
                     if self.config.log_detection_events:
-                        self.logger.debug(
-                            f"Palm detected: confidence={confidence:.2f}, hands={num_hands}"
-                        )
+                        self.logger.info(f"Gesture detected: {self.config.gesture_type}")
                 
                 # Update detection window
-                if self.detection_window.add_detection(palm_detected):
-                    # Threshold met, send MQTT event
-                    if self.mqtt.publish_palm_event():
+                if self.detection_window.add_detection(gesture_detected):
+                    if self.mqtt.publish_gesture_event(self.config.gesture_type):
                         self.stats['events_sent'] += 1
                         self.logger.info(
                             f"MQTT event sent! Total events: {self.stats['events_sent']}"
@@ -997,7 +935,7 @@ class PalmDetectionService:
                 
                 # Save debug frames if enabled
                 if self.config.debug_save_frames:
-                    self._save_debug_frame(frame, frame_rgb, detection_results, palm_detected)
+                    self._save_debug_frame(frame, frame_rgb, detection_results, gesture_detected)
                 
                 # Log frame stats periodically
                 if self.config.log_frame_stats and self.stats['frames_processed'] % 100 == 0:
@@ -1005,57 +943,55 @@ class PalmDetectionService:
                 
             except Exception as e:
                 self.logger.error(f"Processing loop error: {e}", exc_info=True)
-                time.sleep(1)  # Avoid tight error loop
+                time.sleep(1)
         
         self.logger.info("Processing loop ended")
         self._log_stats()
     
-    def _save_debug_frame(self, original_frame: np.ndarray, processed_frame: np.ndarray, 
-                          detection_results, palm_detected: bool):
+    def _save_debug_frame(self, original_frame: np.ndarray, processed_frame: np.ndarray,
+                          detection_results, gesture_detected: bool):
         """Save debug frames periodically for troubleshooting."""
         current_time = time.time()
         
-        # Only save at configured interval
         if current_time - self.last_debug_save < self.config.debug_save_interval:
             return
         
         self.last_debug_save = current_time
         
         try:
-            # Create debug directory if it doesn't exist
             os.makedirs(self.config.debug_frame_path, exist_ok=True)
             
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            detected_str = "DETECTED" if gesture_detected else "none"
             
             # Save original frame
             original_path = os.path.join(
-                self.config.debug_frame_path, 
-                f"original_{timestamp}.jpg"
+                self.config.debug_frame_path,
+                f"original_{timestamp}_{detected_str}.jpg"
             )
             cv2.imwrite(original_path, original_frame)
             
-            # Save preprocessed frame (convert RGB back to BGR for saving)
+            # Save preprocessed frame
             processed_bgr = cv2.cvtColor(processed_frame, cv2.COLOR_RGB2BGR)
             processed_path = os.path.join(
-                self.config.debug_frame_path, 
-                f"processed_{timestamp}.jpg"
+                self.config.debug_frame_path,
+                f"processed_{timestamp}_{detected_str}.jpg"
             )
             cv2.imwrite(processed_path, processed_bgr)
             
-            # Save annotated frame with landmarks if detection occurred
-            if detection_results and detection_results.multi_hand_landmarks:
+            # Save annotated frame with pose landmarks
+            if detection_results and detection_results.pose_landmarks:
                 annotated = self.detector.draw_landmarks(processed_frame, detection_results)
                 annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
                 annotated_path = os.path.join(
-                    self.config.debug_frame_path, 
-                    f"annotated_{timestamp}.jpg"
+                    self.config.debug_frame_path,
+                    f"annotated_{timestamp}_{detected_str}.jpg"
                 )
                 cv2.imwrite(annotated_path, annotated_bgr)
-                self.logger.info(f"Debug frames saved: {timestamp} (with landmarks)")
+                self.logger.info(f"Debug frames saved: {timestamp} (with pose landmarks)")
             else:
-                self.logger.info(f"Debug frames saved: {timestamp} (no hands detected)")
+                self.logger.info(f"Debug frames saved: {timestamp} (no pose detected)")
             
-            # Keep only the last 20 sets of debug frames
             self._cleanup_debug_frames()
             
         except Exception as e:
@@ -1068,7 +1004,6 @@ class PalmDetectionService:
             pattern = os.path.join(self.config.debug_frame_path, "*.jpg")
             files = sorted(glob.glob(pattern), key=os.path.getmtime)
             
-            # Keep only the last 60 files (20 sets of 3 images)
             max_files = 60
             if len(files) > max_files:
                 for f in files[:-max_files]:
@@ -1085,7 +1020,7 @@ class PalmDetectionService:
         
         self.logger.info(
             f"Stats: frames={self.stats['frames_processed']}, "
-            f"palms={self.stats['palms_detected']}, "
+            f"gestures={self.stats['gestures_detected']}, "
             f"events={self.stats['events_sent']}, "
             f"fps={fps:.1f}, "
             f"runtime={runtime:.1f}s"
@@ -1104,7 +1039,6 @@ class PalmDetectionService:
         self.running = False
         self.stop_event.set()
         
-        # Cleanup
         self.detector.close()
         self.rtsp.disconnect()
         self.mqtt.disconnect()
@@ -1119,16 +1053,13 @@ class PalmDetectionService:
 
 def main():
     """Main entry point."""
-    # Load configuration
     config = Config.load()
     
-    # Validate required configuration
     if not config.rtsp_url:
-        print("ERROR: RTSP_URL environment variable is required", file=sys.stderr)
+        print("ERROR: RTSP_URL is required", file=sys.stderr)
         sys.exit(1)
     
-    # Create and start service
-    service = PalmDetectionService(config)
+    service = GestureDetectionService(config)
     
     try:
         success = service.start()
