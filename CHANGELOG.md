@@ -2,6 +2,13 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.2.0] - 2025-12-30
+
+### Changed
+- **Disabled `validate_pose_anatomy` by default** - was rejecting valid poses
+- Anatomical checks (head above shoulders) fail with top-down camera angles
+- Other validation (pose height, visibility) still active to filter false positives
+
 ## [1.1.9] - 2025-12-30
 
 ### Added
