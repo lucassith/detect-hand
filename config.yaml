@@ -3,7 +3,7 @@
 
 name: "Gesture Detection"
 description: "Detects raised arm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.1.6"
+version: "1.1.7"
 slug: "detect-hand"
 init: false
 arch:
@@ -35,7 +35,7 @@ options:
   
   # Gesture Configuration
   gesture_type: "arm_raised"
-  arm_raised_threshold: 0.15
+  arm_raised_threshold: 0.0
   require_both_arms: false
   
   # Pose Validation (to filter false positives)

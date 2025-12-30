@@ -2,6 +2,13 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.7] - 2025-12-30
+
+### Fixed
+- **Lowered `arm_raised_threshold` from 0.15 to 0.0** - was too strict
+- Previously required wrist to be 15% of frame height above nose
+- Now just requires wrist to be above nose (any amount)
+
 ## [1.1.6] - 2025-12-30
 
 ### Added
