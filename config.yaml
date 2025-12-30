@@ -14,6 +14,8 @@ arch:
 startup: application
 boot: auto
 host_network: true
+map:
+  - share:rw
 options:
   # RTSP Configuration
   rtsp_url: "rtsp://user:pass@192.168.1.7/ISAPI/Streaming/channels/101"
