@@ -91,5 +91,3 @@ schema:
   rtsp_reconnect_delay_seconds: int(1,60)
   rtsp_max_reconnect_attempts: int(0,100)
   mqtt_reconnect_delay_seconds: int(1,60)
-
-image: ghcr.io/home-assistant/{arch}-addon-detect-hand
