@@ -338,6 +338,11 @@ class GestureDetector:
             f"confidence={config.confidence_threshold}, "
             f"arm_threshold={config.arm_raised_threshold}"
         )
+        
+        if config.roi_enabled and config.roi_zones:
+            self.logger.info(f"ROI filtering enabled with {len(config.roi_zones)} zone(s):")
+            for zone in config.roi_zones:
+                self.logger.info(f"  - {zone.name}: ({zone.x1},{zone.y1}) to ({zone.x2},{zone.y2})")
     
     def detect_gesture(self, frame_rgb: np.ndarray) -> Tuple[bool, Dict[str, Any], Optional[Any]]:
         """
@@ -362,6 +367,13 @@ class GestureDetector:
         if not is_valid:
             self.logger.debug(f"Pose rejected: {validation_details}")
             return False, {'persons': 0, 'rejected': validation_details}, results
+        
+        # Check if pose is within ROI
+        in_roi, zone_name = self._check_roi(landmarks)
+        if not in_roi:
+            return False, {'persons': 1, 'rejected': 'outside_roi'}, results
+        
+        validation_details['roi_zone'] = zone_name
         
         # Get key landmark positions
         nose = landmarks[self.NOSE]
@@ -488,6 +500,51 @@ class GestureDetector:
         details['reason'] = 'valid'
         return True, details
     
+    def _check_roi(self, landmarks) -> Tuple[bool, Optional[str]]:
+        """
+        Check if the detected pose is within any of the defined ROI zones.
+        
+        Returns:
+            Tuple of (is_in_roi, zone_name)
+        """
+        if not self.config.roi_enabled or not self.config.roi_zones:
+            return True, None  # ROI disabled, allow all
+        
+        # Use the hip center as the person's position (most stable point)
+        left_hip = landmarks[self.LEFT_HIP]
+        right_hip = landmarks[self.RIGHT_HIP]
+        
+        # Calculate center of hips as person's position
+        person_x = (left_hip.x + right_hip.x) / 2 * 100  # Convert to percentage
+        person_y = (left_hip.y + right_hip.y) / 2 * 100
+        
+        # Also check nose position as backup
+        nose = landmarks[self.NOSE]
+        nose_x = nose.x * 100
+        nose_y = nose.y * 100
+        
+        for zone in self.config.roi_zones:
+            # Check if person center is in zone
+            hip_in_zone = (zone.x1 <= person_x <= zone.x2 and 
+                          zone.y1 <= person_y <= zone.y2)
+            
+            # Also accept if nose is in zone
+            nose_in_zone = (zone.x1 <= nose_x <= zone.x2 and 
+                           zone.y1 <= nose_y <= zone.y2)
+            
+            if hip_in_zone or nose_in_zone:
+                self.logger.debug(
+                    f"Person in ROI '{zone.name}': hip=({person_x:.1f},{person_y:.1f}), "
+                    f"nose=({nose_x:.1f},{nose_y:.1f})"
+                )
+                return True, zone.name
+        
+        self.logger.debug(
+            f"Person outside ROI: hip=({person_x:.1f},{person_y:.1f}), "
+            f"nose=({nose_x:.1f},{nose_y:.1f})"
+        )
+        return False, None
+    
     def _check_arm_raised(self, nose, left_shoulder, right_shoulder,
                           left_wrist, right_wrist, left_elbow, right_elbow) -> Tuple[bool, Dict]:
         """
@@ -554,8 +611,26 @@ class GestureDetector:
     
     def draw_landmarks(self, frame: np.ndarray, results) -> np.ndarray:
         """Draw pose landmarks on frame for debugging."""
+        annotated = frame.copy()
+        h, w = annotated.shape[:2]
+        
+        # Draw ROI zones first (so they appear behind landmarks)
+        if self.config.roi_enabled and self.config.roi_zones:
+            for zone in self.config.roi_zones:
+                x1 = int(zone.x1 * w / 100)
+                y1 = int(zone.y1 * h / 100)
+                x2 = int(zone.x2 * w / 100)
+                y2 = int(zone.y2 * h / 100)
+                
+                # Draw rectangle
+                cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 255, 255), 2)
+                
+                # Draw zone name
+                cv2.putText(annotated, zone.name, (x1 + 5, y1 + 20),
+                           cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 255), 2)
+        
+        # Draw pose landmarks
         if results and results.pose_landmarks:
-            annotated = frame.copy()
             mp_drawing.draw_landmarks(
                 annotated,
                 results.pose_landmarks,
@@ -567,8 +642,8 @@ class GestureDetector:
                     color=(255, 0, 0), thickness=2
                 )
             )
-            return annotated
-        return frame
+        
+        return annotated
     
     def close(self):
         """Release MediaPipe resources."""

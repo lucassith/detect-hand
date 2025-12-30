@@ -2,6 +2,18 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.2] - 2025-12-30
+
+### Added
+- **ROI (Region of Interest) filtering** - now active!
+- Define zones where detection should happen, ignore the rest
+- ROI zones drawn on debug frames (yellow rectangles)
+- Zone name shown in detection logs
+
+### Changed
+- ROI enabled by default with example "walkway" zone
+- Debug frames now show ROI zones for easy tuning
+
 ## [1.1.1] - 2025-12-30
 
 ### Added
