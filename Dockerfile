@@ -1,5 +1,6 @@
 # Open Palm Detection Add-on for Home Assistant
 # Supports IR/low-light camera streams
+# Using Debian base for MediaPipe compatibility
 
 ARG BUILD_FROM
 FROM ${BUILD_FROM}
@@ -7,21 +8,25 @@ FROM ${BUILD_FROM}
 # Set shell
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+# Set environment variables
+ENV DEBIAN_FRONTEND=noninteractive
+
 # Install system dependencies
-RUN apk add --no-cache \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 \
-    py3-pip \
-    py3-numpy \
-    py3-opencv \
+    python3-pip \
+    python3-venv \
+    python3-numpy \
+    python3-opencv \
+    libopencv-dev \
     ffmpeg \
-    libstdc++ \
-    libgcc \
-    musl \
-    jpeg-dev \
-    zlib-dev \
-    libffi-dev \
-    build-base \
-    python3-dev
+    libgl1 \
+    libglib2.0-0 \
+    libsm6 \
+    libxext6 \
+    libxrender1 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Create working directory
 WORKDIR /app
