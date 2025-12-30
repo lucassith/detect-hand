@@ -3,7 +3,7 @@
 
 name: "Open Palm Detection"
 description: "Detects open palm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.0.2"
+version: "1.0.3"
 slug: "detect-hand"
 init: false
 arch:
@@ -31,15 +31,15 @@ options:
   detection_duration_seconds: 4.0
   detection_threshold_percent: 80
   cooldown_seconds: 5.0
-  confidence_threshold: 0.5
+  confidence_threshold: 0.3
   
   # Performance Configuration
   frame_skip: 2
-  max_frame_width: 640
+  max_frame_width: 1280
   processing_fps: 10
   
   # IR/Low-Light Configuration
-  ir_mode_enabled: true
+  ir_mode_enabled: false
   clahe_clip_limit: 3.0
   clahe_grid_size: 8
   brightness_boost: 1.2
