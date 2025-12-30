@@ -3,7 +3,7 @@
 
 name: "Gesture Detection"
 description: "Detects raised arm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.1.4"
+version: "1.1.5"
 slug: "detect-hand"
 init: false
 arch:
@@ -47,9 +47,9 @@ options:
   roi_enabled: true
   roi_zones:
     - name: "walkway"
-      x1: 30
-      y1: 15
-      x2: 78
+      x1: 18
+      y1: 12
+      x2: 65
       y2: 95
   
   # Performance Configuration
