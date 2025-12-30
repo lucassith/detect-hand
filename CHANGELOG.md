@@ -2,6 +2,22 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [2.0.0] - 2025-12-30
+
+### Changed
+- **BREAKING: Replaced MediaPipe with YOLOv8-pose**
+  - MediaPipe fundamentally cannot work with IR/grayscale images
+  - YOLOv8 is trained on more diverse data and handles IR better
+  - Model options: nano (0), small (1), medium (2), large (3)
+
+### Added
+- YOLOv8-pose integration with full pose detection
+- 17 keypoint detection (same as COCO format)
+- Automatic model download on first run
+
+### Fixed
+- IR camera detection should now work reliably
+
 ## [1.2.1] - 2025-12-30
 
 ### Added

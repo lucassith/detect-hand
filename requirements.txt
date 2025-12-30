@@ -1,10 +1,10 @@
-# Open Palm Detection Add-on Dependencies
-# Using flexible versions for better compatibility
+# Gesture Detection Add-on Dependencies
+# Version 2.0 - Using YOLOv8 instead of MediaPipe for IR compatibility
 
-# MediaPipe for hand/palm detection
-mediapipe>=0.10.0
+# YOLOv8 for pose detection (works with IR/grayscale)
+ultralytics>=8.0.0
 
-# OpenCV for video processing (may be provided by system)
+# OpenCV for video processing
 opencv-python-headless>=4.8.0
 
 # MQTT client
