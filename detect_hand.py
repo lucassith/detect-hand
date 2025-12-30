@@ -115,6 +115,7 @@ class Config:
     debug_save_frames: bool
     debug_save_interval: int
     debug_frame_path: str
+    debug_draw_roi: bool
     
     # Connection Configuration
     rtsp_reconnect_delay_seconds: int
@@ -210,6 +211,7 @@ class Config:
             debug_save_frames=get_value('debug_save_frames', 'DEBUG_SAVE_FRAMES', False, bool),
             debug_save_interval=get_value('debug_save_interval', 'DEBUG_SAVE_INTERVAL', 30, int),
             debug_frame_path=get_value('debug_frame_path', 'DEBUG_FRAME_PATH', '/share/detect-hand-debug'),
+            debug_draw_roi=get_value('debug_draw_roi', 'DEBUG_DRAW_ROI', True, bool),
             rtsp_reconnect_delay_seconds=get_value('rtsp_reconnect_delay_seconds', 'RTSP_RECONNECT_DELAY_SECONDS', 5, int),
             rtsp_max_reconnect_attempts=get_value('rtsp_max_reconnect_attempts', 'RTSP_MAX_RECONNECT_ATTEMPTS', 0, int),
             mqtt_reconnect_delay_seconds=get_value('mqtt_reconnect_delay_seconds', 'MQTT_RECONNECT_DELAY_SECONDS', 5, int),
@@ -613,13 +615,13 @@ class GestureDetector:
         
         return detected, details
     
-    def draw_landmarks(self, frame: np.ndarray, results) -> np.ndarray:
+    def draw_landmarks(self, frame: np.ndarray, results, draw_roi: bool = True) -> np.ndarray:
         """Draw pose landmarks on frame for debugging."""
         annotated = frame.copy()
         h, w = annotated.shape[:2]
         
         # Draw ROI zones first (so they appear behind landmarks)
-        if self.config.roi_enabled and self.config.roi_zones:
+        if draw_roi and self.config.roi_enabled and self.config.roi_zones:
             for zone in self.config.roi_zones:
                 x1 = int(zone.x1 * w / 100)
                 y1 = int(zone.y1 * h / 100)
@@ -1160,9 +1162,12 @@ class GestureDetectionService:
             )
             cv2.imwrite(processed_path, processed_bgr)
             
-            # Save annotated frame with ROI zones and pose landmarks (if any)
-            # Always draw ROI zones, draw pose only if detected
-            annotated = self.detector.draw_landmarks(processed_frame, detection_results)
+            # Save annotated frame with ROI zones (optional) and pose landmarks (if any)
+            annotated = self.detector.draw_landmarks(
+                processed_frame, 
+                detection_results, 
+                draw_roi=self.config.debug_draw_roi
+            )
             annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
             annotated_path = os.path.join(
                 self.config.debug_frame_path,

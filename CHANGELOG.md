@@ -2,6 +2,12 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.4] - 2025-12-30
+
+### Added
+- `debug_draw_roi` option to control whether ROI zones are drawn on debug frames
+- Default: true (ROI zones are drawn)
+
 ## [1.1.3] - 2025-12-30
 
 ### Fixed
