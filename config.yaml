@@ -3,7 +3,7 @@
 
 name: "Open Palm Detection"
 description: "Detects open palm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.0.0"
+version: "1.0.1"
 slug: "detect-hand"
 init: false
 arch:

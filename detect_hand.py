@@ -24,8 +24,29 @@ from threading import Thread, Event, Lock
 
 import cv2
 import numpy as np
-import mediapipe as mp
 import paho.mqtt.client as mqtt
+
+# MediaPipe import with diagnostics
+try:
+    import mediapipe as mp
+    print(f"MediaPipe imported from: {mp.__file__}")
+    print(f"MediaPipe version: {mp.__version__}")
+    print(f"MediaPipe has solutions: {hasattr(mp, 'solutions')}")
+    
+    # Try direct import if solutions attribute missing
+    if not hasattr(mp, 'solutions'):
+        print("Trying direct import of mediapipe.python.solutions...")
+        from mediapipe.python.solutions import hands as mp_hands_module
+        # Create a namespace object to hold solutions
+        class Solutions:
+            hands = mp_hands_module
+        mp.solutions = Solutions()
+        print("Direct import successful, patched mp.solutions")
+except Exception as e:
+    print(f"MediaPipe import error: {e}")
+    import traceback
+    traceback.print_exc()
+    raise
 
 
 # =============================================================================
