@@ -163,15 +163,19 @@ class Config:
         # Parse ROI zones
         roi_zones = []
         raw_zones = options.get('roi_zones', [])
+        print(f"Raw ROI zones from config: {raw_zones}")
         for zone in raw_zones:
+            print(f"Processing zone: {zone}, type: {type(zone)}")
             if isinstance(zone, dict):
                 roi_zones.append(ROIZone(
                     name=zone.get('name', 'unnamed'),
-                    x1=zone.get('x1', 0),
-                    y1=zone.get('y1', 0),
-                    x2=zone.get('x2', 100),
-                    y2=zone.get('y2', 100),
+                    x1=int(zone.get('x1', 0)),
+                    y1=int(zone.get('y1', 0)),
+                    x2=int(zone.get('x2', 100)),
+                    y2=int(zone.get('y2', 100)),
                 ))
+                print(f"Added ROI zone: {roi_zones[-1]}")
+        print(f"Total ROI zones loaded: {len(roi_zones)}")
         
         return cls(
             rtsp_url=get_value('rtsp_url', 'RTSP_URL', ''),
@@ -1156,18 +1160,18 @@ class GestureDetectionService:
             )
             cv2.imwrite(processed_path, processed_bgr)
             
-            # Save annotated frame with pose landmarks
-            if detection_results and detection_results.pose_landmarks:
-                annotated = self.detector.draw_landmarks(processed_frame, detection_results)
-                annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
-                annotated_path = os.path.join(
-                    self.config.debug_frame_path,
-                    f"annotated_{timestamp}_{detected_str}.jpg"
-                )
-                cv2.imwrite(annotated_path, annotated_bgr)
-                self.logger.info(f"Debug frames saved: {timestamp} (with pose landmarks)")
-            else:
-                self.logger.info(f"Debug frames saved: {timestamp} (no pose detected)")
+            # Save annotated frame with ROI zones and pose landmarks (if any)
+            # Always draw ROI zones, draw pose only if detected
+            annotated = self.detector.draw_landmarks(processed_frame, detection_results)
+            annotated_bgr = cv2.cvtColor(annotated, cv2.COLOR_RGB2BGR)
+            annotated_path = os.path.join(
+                self.config.debug_frame_path,
+                f"annotated_{timestamp}_{detected_str}.jpg"
+            )
+            cv2.imwrite(annotated_path, annotated_bgr)
+            
+            has_pose = detection_results and detection_results.pose_landmarks
+            self.logger.info(f"Debug frames saved: {timestamp} (pose={'yes' if has_pose else 'no'}, ROI={'yes' if self.config.roi_enabled else 'no'})")
             
             self._cleanup_debug_frames()
             

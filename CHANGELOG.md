@@ -2,6 +2,13 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.3] - 2025-12-30
+
+### Fixed
+- ROI zones now always drawn on debug frames (even when no pose detected)
+- Added debug logging for ROI zone loading
+- Coordinates are percentages (0-100), not pixels
+
 ## [1.1.2] - 2025-12-30
 
 ### Added
