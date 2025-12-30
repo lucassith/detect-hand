@@ -1,0 +1,19 @@
+ICON PLACEHOLDER
+
+To add an icon for this add-on, create a 512x512 PNG image named "icon.png" in this directory.
+
+Recommended icon design:
+- A hand with open palm
+- Simple, flat design style matching Home Assistant aesthetics
+- Use colors: #41BDF5 (Home Assistant blue) or #03A9F4
+
+You can find free icons at:
+- https://www.flaticon.com/search?word=hand
+- https://iconmonstr.com/?s=hand
+- https://materialdesignicons.com/ (search for "hand")
+
+Once you have the icon:
+1. Rename it to "icon.png"
+2. Place it in /addons/detect-hand/
+3. Delete this icon.txt file
+4. Reload the add-on store in Home Assistant

@@ -1,0 +1,14 @@
+# Open Palm Detection Add-on Dependencies
+# Pinned versions for reproducibility
+
+# MediaPipe for hand/palm detection
+mediapipe==0.10.9
+
+# OpenCV for video processing (may be provided by system)
+opencv-python-headless==4.9.0.80
+
+# MQTT client
+paho-mqtt==2.0.0
+
+# NumPy for array operations (may be provided by system)
+numpy>=1.24.0,<2.0.0

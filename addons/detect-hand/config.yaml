@@ -1,0 +1,95 @@
+# Home Assistant Add-on: Open Palm Detection
+# Detects open palm gestures from RTSP camera stream and sends MQTT events
+
+name: "Open Palm Detection"
+description: "Detects open palm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
+version: "1.0.0"
+slug: "detect-hand"
+init: false
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - i386
+startup: application
+boot: auto
+host_network: true
+options:
+  # RTSP Configuration
+  rtsp_url: "rtsp://user:pass@192.168.1.7/ISAPI/Streaming/channels/101"
+  
+  # MQTT Configuration
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_topic: "home/gesture/detect-hand"
+  
+  # Detection Configuration
+  detection_duration_seconds: 4.0
+  detection_threshold_percent: 80
+  cooldown_seconds: 5.0
+  confidence_threshold: 0.5
+  
+  # Performance Configuration
+  frame_skip: 2
+  max_frame_width: 640
+  processing_fps: 10
+  
+  # IR/Low-Light Configuration
+  ir_mode_enabled: true
+  clahe_clip_limit: 3.0
+  clahe_grid_size: 8
+  brightness_boost: 1.2
+  contrast_boost: 1.3
+  
+  # Logging Configuration
+  log_level: "INFO"
+  log_detection_events: true
+  log_frame_stats: false
+  
+  # Connection Configuration
+  rtsp_reconnect_delay_seconds: 5
+  rtsp_max_reconnect_attempts: 0
+  mqtt_reconnect_delay_seconds: 5
+
+schema:
+  # RTSP Configuration
+  rtsp_url: str
+  
+  # MQTT Configuration
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_topic: str
+  
+  # Detection Configuration
+  detection_duration_seconds: float
+  detection_threshold_percent: int(1,100)
+  cooldown_seconds: float
+  confidence_threshold: float(0.1,1.0)
+  
+  # Performance Configuration
+  frame_skip: int(0,30)
+  max_frame_width: int(320,1920)
+  processing_fps: int(1,30)
+  
+  # IR/Low-Light Configuration
+  ir_mode_enabled: bool
+  clahe_clip_limit: float(1.0,10.0)
+  clahe_grid_size: int(2,16)
+  brightness_boost: float(0.5,3.0)
+  contrast_boost: float(0.5,3.0)
+  
+  # Logging Configuration
+  log_level: list(DEBUG|INFO|WARNING|ERROR)
+  log_detection_events: bool
+  log_frame_stats: bool
+  
+  # Connection Configuration
+  rtsp_reconnect_delay_seconds: int(1,60)
+  rtsp_max_reconnect_attempts: int(0,100)
+  mqtt_reconnect_delay_seconds: int(1,60)
+
+image: ghcr.io/home-assistant/{arch}-addon-detect-hand

@@ -1,0 +1,136 @@
+# English translations for Open Palm Detection Add-on
+
+configuration:
+  rtsp_url:
+    name: RTSP URL
+    description: >-
+      Full RTSP stream URL including credentials.
+      Format: rtsp://username:password@ip_address/path/to/stream
+      Example: rtsp://admin:pass123@192.168.1.7/ISAPI/Streaming/channels/101
+  
+  mqtt_host:
+    name: MQTT Host
+    description: >-
+      MQTT broker hostname. Use 'core-mosquitto' for Home Assistant's built-in broker.
+  
+  mqtt_port:
+    name: MQTT Port
+    description: MQTT broker port (default: 1883)
+  
+  mqtt_username:
+    name: MQTT Username
+    description: MQTT authentication username (leave empty if not required)
+  
+  mqtt_password:
+    name: MQTT Password
+    description: MQTT authentication password (leave empty if not required)
+  
+  mqtt_topic:
+    name: MQTT Topic
+    description: >-
+      Topic to publish palm detection events.
+      Payload will be: {"channel": "XXX"}
+  
+  detection_duration_seconds:
+    name: Detection Duration (seconds)
+    description: >-
+      How long the open palm must be visible before triggering an event.
+      The palm must be detected in the specified percentage of frames during this period.
+  
+  detection_threshold_percent:
+    name: Detection Threshold (%)
+    description: >-
+      Percentage of frames within the detection duration that must contain an open palm.
+      Lower values are more lenient, higher values require more consistent detection.
+  
+  cooldown_seconds:
+    name: Cooldown Period (seconds)
+    description: >-
+      Time to wait after sending an event before another event can be triggered.
+      Prevents rapid-fire event sending.
+  
+  confidence_threshold:
+    name: Detection Confidence
+    description: >-
+      Minimum confidence score (0.1-1.0) for hand detection.
+      Lower values detect more hands but may have false positives.
+      Recommended: 0.4-0.6 for IR cameras, 0.5-0.7 for daylight.
+  
+  frame_skip:
+    name: Frame Skip
+    description: >-
+      Process every Nth frame. Higher values reduce CPU usage.
+      0 = process all frames, 2 = process every 3rd frame, etc.
+  
+  max_frame_width:
+    name: Max Frame Width
+    description: >-
+      Maximum width for frame processing. Frames larger than this will be scaled down.
+      Lower values reduce CPU usage but may affect detection accuracy.
+  
+  processing_fps:
+    name: Processing FPS
+    description: >-
+      Target frames per second for processing.
+      Lower values reduce CPU usage.
+  
+  ir_mode_enabled:
+    name: IR/Low-Light Mode
+    description: >-
+      Enable preprocessing for IR or low-light cameras.
+      Applies contrast enhancement and brightness adjustments.
+  
+  clahe_clip_limit:
+    name: CLAHE Clip Limit
+    description: >-
+      Contrast Limited Adaptive Histogram Equalization clip limit.
+      Higher values increase contrast. Recommended: 2.0-5.0 for IR cameras.
+  
+  clahe_grid_size:
+    name: CLAHE Grid Size
+    description: >-
+      CLAHE tile grid size. Smaller values provide more local contrast enhancement.
+      Recommended: 8 for most cases.
+  
+  brightness_boost:
+    name: Brightness Boost
+    description: >-
+      Brightness multiplier for IR/low-light images.
+      1.0 = no change, higher values brighten the image.
+  
+  contrast_boost:
+    name: Contrast Boost
+    description: >-
+      Contrast multiplier for IR/low-light images.
+      1.0 = no change, higher values increase contrast.
+  
+  log_level:
+    name: Log Level
+    description: >-
+      Logging verbosity. DEBUG provides the most detail for troubleshooting.
+      INFO is recommended for normal operation.
+  
+  log_detection_events:
+    name: Log Detection Events
+    description: >-
+      Log each palm detection event. Useful for debugging but may be verbose.
+  
+  log_frame_stats:
+    name: Log Frame Statistics
+    description: >-
+      Log frame processing statistics periodically.
+      Useful for performance tuning.
+  
+  rtsp_reconnect_delay_seconds:
+    name: RTSP Reconnect Delay
+    description: Seconds to wait between RTSP reconnection attempts.
+  
+  rtsp_max_reconnect_attempts:
+    name: RTSP Max Reconnect Attempts
+    description: >-
+      Maximum number of RTSP reconnection attempts.
+      Set to 0 for unlimited attempts.
+  
+  mqtt_reconnect_delay_seconds:
+    name: MQTT Reconnect Delay
+    description: Seconds to wait between MQTT reconnection attempts.
