@@ -3,7 +3,7 @@
 
 name: "Gesture Detection"
 description: "Detects raised arm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.1.8"
+version: "1.1.9"
 slug: "detect-hand"
 init: false
 arch:
@@ -59,12 +59,13 @@ options:
   
   # IR/Low-Light Configuration
   ir_mode_enabled: true
-  clahe_clip_limit: 4.0
+  ir_preprocessing_mode: "minimal"
+  clahe_clip_limit: 2.0
   clahe_grid_size: 8
-  brightness_boost: 1.4
-  contrast_boost: 1.5
-  ir_gamma_correction: 0.8
-  ir_denoise: true
+  brightness_boost: 1.0
+  contrast_boost: 1.0
+  ir_gamma_correction: 1.0
+  ir_denoise: false
   
   # Logging Configuration
   log_level: "INFO"
@@ -125,6 +126,7 @@ schema:
   
   # IR/Low-Light Configuration
   ir_mode_enabled: bool
+  ir_preprocessing_mode: list(none|minimal|full)
   clahe_clip_limit: float(1.0,10.0)
   clahe_grid_size: int(2,16)
   brightness_boost: float(0.5,3.0)

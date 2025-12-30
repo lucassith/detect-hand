@@ -2,12 +2,34 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.9] - 2025-12-30
+
+### Added
+- **New `ir_preprocessing_mode`** setting with three options:
+  - `none`: Just convert grayscale to RGB (preserves original)
+  - `minimal`: Light CLAHE only (recommended for good IR cameras)
+  - `full`: Full pipeline (denoise, gamma, CLAHE, brightness/contrast)
+
+### Changed
+- Default mode is now `minimal` to prevent over-processing
+- Reduced default CLAHE clip limit to 2.0
+- Disabled brightness/contrast boost by default (set to 1.0)
+- Disabled gamma correction by default (set to 1.0)
+
+### Fixed
+- Over-aggressive IR preprocessing that was blowing out images
+
+## [1.1.8] - 2025-12-30
+
+### Fixed
+- Schema validation now allows `arm_raised_threshold` as low as 0.01
+
 ## [1.1.7] - 2025-12-30
 
 ### Fixed
-- **Lowered `arm_raised_threshold` from 0.15 to 0.0** - was too strict
+- **Lowered `arm_raised_threshold` from 0.15 to 0.02** - was too strict
 - Previously required wrist to be 15% of frame height above nose
-- Now just requires wrist to be above nose (any amount)
+- Now just requires wrist to be 2% above nose
 
 ## [1.1.6] - 2025-12-30
 

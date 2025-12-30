@@ -101,6 +101,7 @@ class Config:
     
     # IR/Low-Light Configuration
     ir_mode_enabled: bool
+    ir_preprocessing_mode: str  # none, minimal, full
     clahe_clip_limit: float
     clahe_grid_size: int
     brightness_boost: float
@@ -203,12 +204,13 @@ class Config:
             max_frame_width=get_value('max_frame_width', 'MAX_FRAME_WIDTH', 1280, int),
             processing_fps=get_value('processing_fps', 'PROCESSING_FPS', 10, int),
             ir_mode_enabled=get_value('ir_mode_enabled', 'IR_MODE_ENABLED', True, bool),
-            clahe_clip_limit=get_value('clahe_clip_limit', 'CLAHE_CLIP_LIMIT', 4.0, float),
+            ir_preprocessing_mode=get_value('ir_preprocessing_mode', 'IR_PREPROCESSING_MODE', 'minimal'),
+            clahe_clip_limit=get_value('clahe_clip_limit', 'CLAHE_CLIP_LIMIT', 2.0, float),
             clahe_grid_size=get_value('clahe_grid_size', 'CLAHE_GRID_SIZE', 8, int),
-            brightness_boost=get_value('brightness_boost', 'BRIGHTNESS_BOOST', 1.4, float),
-            contrast_boost=get_value('contrast_boost', 'CONTRAST_BOOST', 1.5, float),
-            ir_gamma_correction=get_value('ir_gamma_correction', 'IR_GAMMA_CORRECTION', 0.8, float),
-            ir_denoise=get_value('ir_denoise', 'IR_DENOISE', True, bool),
+            brightness_boost=get_value('brightness_boost', 'BRIGHTNESS_BOOST', 1.0, float),
+            contrast_boost=get_value('contrast_boost', 'CONTRAST_BOOST', 1.0, float),
+            ir_gamma_correction=get_value('ir_gamma_correction', 'IR_GAMMA_CORRECTION', 1.0, float),
+            ir_denoise=get_value('ir_denoise', 'IR_DENOISE', False, bool),
             log_level=get_value('log_level', 'LOG_LEVEL', 'INFO'),
             log_detection_events=get_value('log_detection_events', 'LOG_DETECTION_EVENTS', True, bool),
             log_frame_stats=get_value('log_frame_stats', 'LOG_FRAME_STATS', False, bool),
@@ -288,14 +290,14 @@ class IRPreprocessor:
         self.gamma_table = self._build_gamma_table(config.ir_gamma_correction)
         
         self.logger.info(
-            f"IR Preprocessor initialized: CLAHE clip={config.clahe_clip_limit}, "
-            f"grid={config.clahe_grid_size}, brightness={config.brightness_boost}, "
-            f"contrast={config.contrast_boost}, gamma={config.ir_gamma_correction}, "
-            f"denoise={config.ir_denoise}"
+            f"IR Preprocessor initialized: mode={config.ir_preprocessing_mode}, "
+            f"CLAHE clip={config.clahe_clip_limit}"
         )
     
     def _build_gamma_table(self, gamma: float) -> np.ndarray:
         """Build lookup table for gamma correction."""
+        if gamma == 1.0:
+            return np.arange(0, 256).astype("uint8")
         inv_gamma = 1.0 / gamma
         table = np.array([
             ((i / 255.0) ** inv_gamma) * 255
@@ -305,15 +307,12 @@ class IRPreprocessor:
     
     def preprocess(self, frame: np.ndarray) -> np.ndarray:
         """
-        Preprocess frame for better pose detection in IR/low-light conditions.
+        Preprocess frame based on configured mode.
         
-        Pipeline:
-        1. Convert to grayscale (if needed)
-        2. Denoise (optional) - reduces IR noise
-        3. Apply gamma correction - enhances mid-tones
-        4. Apply CLAHE - adaptive contrast enhancement
-        5. Apply brightness/contrast adjustment
-        6. Convert to RGB for MediaPipe
+        Modes:
+        - none: Just convert grayscale to RGB, no enhancement
+        - minimal: Light CLAHE only
+        - full: Full pipeline (denoise, gamma, CLAHE, brightness/contrast)
         """
         # Step 1: Convert to grayscale
         if len(frame.shape) == 3:
@@ -321,28 +320,44 @@ class IRPreprocessor:
         else:
             gray = frame.copy()
         
-        # Step 2: Denoise (optional) - helps with IR camera noise
-        if self.config.ir_denoise:
-            gray = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
+        mode = self.config.ir_preprocessing_mode
         
-        # Step 3: Gamma correction - brightens dark areas, enhances mid-tones
-        gamma_corrected = cv2.LUT(gray, self.gamma_table)
+        if mode == "none":
+            # No preprocessing - just convert to RGB
+            rgb = cv2.cvtColor(gray, cv2.COLOR_GRAY2RGB)
+            return rgb
         
-        # Step 4: CLAHE - adaptive histogram equalization
-        enhanced = self.clahe.apply(gamma_corrected)
+        elif mode == "minimal":
+            # Light CLAHE only - preserves image while improving contrast slightly
+            enhanced = self.clahe.apply(gray)
+            rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+            return rgb
         
-        # Step 5: Brightness and contrast adjustment
-        brightness_offset = int((self.config.brightness_boost - 1.0) * 128)
-        enhanced = cv2.convertScaleAbs(
-            enhanced, 
-            alpha=self.config.contrast_boost, 
-            beta=brightness_offset
-        )
-        
-        # Step 6: Convert to RGB (MediaPipe requires RGB)
-        rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
-        
-        return rgb
+        else:  # mode == "full"
+            # Full preprocessing pipeline
+            
+            # Denoise (optional)
+            if self.config.ir_denoise:
+                gray = cv2.fastNlMeansDenoising(gray, None, h=10, templateWindowSize=7, searchWindowSize=21)
+            
+            # Gamma correction
+            if self.config.ir_gamma_correction != 1.0:
+                gray = cv2.LUT(gray, self.gamma_table)
+            
+            # CLAHE
+            enhanced = self.clahe.apply(gray)
+            
+            # Brightness and contrast adjustment
+            if self.config.brightness_boost != 1.0 or self.config.contrast_boost != 1.0:
+                brightness_offset = int((self.config.brightness_boost - 1.0) * 128)
+                enhanced = cv2.convertScaleAbs(
+                    enhanced, 
+                    alpha=self.config.contrast_boost, 
+                    beta=brightness_offset
+                )
+            
+            rgb = cv2.cvtColor(enhanced, cv2.COLOR_GRAY2RGB)
+            return rgb
 
 
 # =============================================================================
