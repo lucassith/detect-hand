@@ -79,6 +79,7 @@ class Config:
     detection_threshold_percent: int
     cooldown_seconds: float
     confidence_threshold: float
+    model_complexity: int
     
     # Gesture Configuration
     gesture_type: str
@@ -191,7 +192,8 @@ class Config:
             detection_duration_seconds=get_value('detection_duration_seconds', 'DETECTION_DURATION_SECONDS', 4.0, float),
             detection_threshold_percent=get_value('detection_threshold_percent', 'DETECTION_THRESHOLD_PERCENT', 80, int),
             cooldown_seconds=get_value('cooldown_seconds', 'COOLDOWN_SECONDS', 5.0, float),
-            confidence_threshold=get_value('confidence_threshold', 'CONFIDENCE_THRESHOLD', 0.3, float),
+            confidence_threshold=get_value('confidence_threshold', 'CONFIDENCE_THRESHOLD', 0.1, float),
+            model_complexity=get_value('model_complexity', 'MODEL_COMPLEXITY', 2, int),
             gesture_type=get_value('gesture_type', 'GESTURE_TYPE', 'arm_raised'),
             arm_raised_threshold=get_value('arm_raised_threshold', 'ARM_RAISED_THRESHOLD', 0.15, float),
             require_both_arms=get_value('require_both_arms', 'REQUIRE_BOTH_ARMS', False, bool),
@@ -383,14 +385,17 @@ class GestureDetector:
         self.logger = logger
         
         # Initialize MediaPipe Pose
+        # model_complexity: 0=lite (fast), 1=full (balanced), 2=heavy (accurate)
         self.pose = mp_pose.Pose(
-            static_image_mode=False,
-            model_complexity=1,  # 0=lite, 1=full, 2=heavy
-            smooth_landmarks=True,
+            static_image_mode=True,  # True = better detection, no tracking
+            model_complexity=config.model_complexity,
+            smooth_landmarks=False,
             enable_segmentation=False,
             min_detection_confidence=config.confidence_threshold,
-            min_tracking_confidence=config.confidence_threshold * 0.8,
+            min_tracking_confidence=config.confidence_threshold,
         )
+        
+        self.logger.info(f"Using model_complexity={config.model_complexity} (0=lite, 1=full, 2=heavy)")
         
         self.logger.info(
             f"Gesture detector initialized: type={config.gesture_type}, "

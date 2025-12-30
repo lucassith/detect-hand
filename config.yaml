@@ -3,7 +3,7 @@
 
 name: "Gesture Detection"
 description: "Detects raised arm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
-version: "1.2.0"
+version: "1.2.1"
 slug: "detect-hand"
 init: false
 arch:
@@ -31,7 +31,8 @@ options:
   detection_duration_seconds: 4.0
   detection_threshold_percent: 80
   cooldown_seconds: 5.0
-  confidence_threshold: 0.3
+  confidence_threshold: 0.1
+  model_complexity: 2
   
   # Gesture Configuration
   gesture_type: "arm_raised"
@@ -40,7 +41,7 @@ options:
   
   # Pose Validation (to filter false positives)
   min_pose_height_ratio: 0.15
-  min_landmark_visibility: 0.5
+  min_landmark_visibility: 0.2
   validate_pose_anatomy: false
   
   # ROI Configuration - Only detect in these zones
@@ -53,13 +54,13 @@ options:
       y2: 95
   
   # Performance Configuration
-  frame_skip: 2
-  max_frame_width: 1280
+  frame_skip: 0
+  max_frame_width: 1920
   processing_fps: 10
   
   # IR/Low-Light Configuration
   ir_mode_enabled: true
-  ir_preprocessing_mode: "minimal"
+  ir_preprocessing_mode: "none"
   clahe_clip_limit: 2.0
   clahe_grid_size: 8
   brightness_boost: 1.0
@@ -99,6 +100,7 @@ schema:
   detection_threshold_percent: int(1,100)
   cooldown_seconds: float
   confidence_threshold: float(0.1,1.0)
+  model_complexity: int(0,2)
   
   # Gesture Configuration
   gesture_type: list(arm_raised|both_arms_raised|wave)

@@ -2,6 +2,22 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.2.1] - 2025-12-30
+
+### Added
+- **`model_complexity` option** (0=lite, 1=full, 2=heavy)
+  - Heavy model (2) may work better with unusual images like IR
+
+### Changed
+- **Aggressive IR detection settings**:
+  - `confidence_threshold`: 0.3 → 0.1 (much more sensitive)
+  - `min_landmark_visibility`: 0.5 → 0.2 (accept lower quality landmarks)
+  - `ir_preprocessing_mode`: minimal → none (use raw image)
+  - `frame_skip`: 2 → 0 (process every frame)
+  - `max_frame_width`: 1280 → 1920 (full resolution)
+  - `model_complexity`: 1 → 2 (heavy model)
+- Switched to `static_image_mode=True` for better per-frame detection
+
 ## [1.2.0] - 2025-12-30
 
 ### Changed
