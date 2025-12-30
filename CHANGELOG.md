@@ -2,6 +2,25 @@
 
 All notable changes to the Gesture Detection Add-on will be documented in this file.
 
+## [1.1.6] - 2025-12-30
+
+### Added
+- **Enhanced IR preprocessing** to improve pose detection in IR/night mode
+- `ir_gamma_correction` - brightens dark areas (default: 0.8)
+- `ir_denoise` - reduces IR camera noise (default: true)
+- Improved preprocessing pipeline: Denoise → Gamma → CLAHE → Brightness/Contrast
+
+### Changed
+- IR mode now enabled by default with optimized settings
+- Increased default `clahe_clip_limit` to 4.0
+- Increased default `brightness_boost` to 1.4
+- Increased default `contrast_boost` to 1.5
+
+## [1.1.5] - 2025-12-30
+
+### Changed
+- Adjusted default ROI zone to better cover walkway area
+
 ## [1.1.4] - 2025-12-30
 
 ### Added
