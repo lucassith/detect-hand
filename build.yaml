@@ -1,0 +1,17 @@
+# Build configuration for Open Palm Detection Add-on
+# Using Debian-based images for MediaPipe compatibility
+
+build_from:
+  amd64: ghcr.io/home-assistant/amd64-base-debian:bookworm
+  aarch64: ghcr.io/home-assistant/aarch64-base-debian:bookworm
+  armv7: ghcr.io/home-assistant/armv7-base-debian:bookworm
+  i386: ghcr.io/home-assistant/i386-base-debian:bookworm
+
+labels:
+  org.opencontainers.image.title: "Open Palm Detection"
+  org.opencontainers.image.description: "Detects open palm gestures from RTSP camera stream and sends MQTT events"
+  org.opencontainers.image.source: "https://github.com/home-assistant/addons"
+  org.opencontainers.image.authors: "Home Assistant Add-on Developer"
+
+args:
+  BUILD_ARCH: amd64

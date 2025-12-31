@@ -1,0 +1,153 @@
+# Home Assistant Add-on: Gesture Detection (Raised Arm)
+# Detects raised arm gestures from RTSP camera stream and sends MQTT events
+
+name: "Gesture Detection"
+description: "Detects raised arm gestures from RTSP camera stream (including IR/low-light) and sends MQTT events"
+version: "2.0.0"
+slug: "detect-hand"
+init: false
+arch:
+  - amd64
+  - aarch64
+  - armv7
+  - i386
+startup: application
+boot: auto
+host_network: true
+map:
+  - share:rw
+options:
+  # RTSP Configuration
+  rtsp_url: "rtsp://user:pass@192.168.1.7/ISAPI/Streaming/channels/101"
+  
+  # MQTT Configuration
+  mqtt_host: "core-mosquitto"
+  mqtt_port: 1883
+  mqtt_username: ""
+  mqtt_password: ""
+  mqtt_topic: "home/gesture/detect-hand"
+  
+  # Detection Configuration
+  detection_duration_seconds: 4.0
+  detection_threshold_percent: 80
+  cooldown_seconds: 5.0
+  confidence_threshold: 0.1
+  model_complexity: 2
+  
+  # Gesture Configuration
+  gesture_type: "arm_raised"
+  arm_raised_threshold: 0.02
+  require_both_arms: false
+  
+  # Pose Validation (to filter false positives)
+  min_pose_height_ratio: 0.15
+  min_landmark_visibility: 0.2
+  validate_pose_anatomy: false
+  
+  # ROI Configuration - Only detect in these zones
+  roi_enabled: true
+  roi_zones:
+    - name: "walkway"
+      x1: 18
+      y1: 12
+      x2: 65
+      y2: 95
+  
+  # Performance Configuration
+  frame_skip: 0
+  max_frame_width: 1920
+  processing_fps: 10
+  
+  # IR/Low-Light Configuration
+  ir_mode_enabled: true
+  ir_preprocessing_mode: "none"
+  clahe_clip_limit: 2.0
+  clahe_grid_size: 8
+  brightness_boost: 1.0
+  contrast_boost: 1.0
+  ir_gamma_correction: 1.0
+  ir_denoise: false
+  
+  # Logging Configuration
+  log_level: "INFO"
+  log_detection_events: true
+  log_frame_stats: false
+  
+  # Debug Configuration
+  debug_save_frames: false
+  debug_save_interval: 30
+  debug_frame_path: "/share/detect-hand-debug"
+  debug_draw_roi: true
+  
+  # Connection Configuration
+  rtsp_reconnect_delay_seconds: 5
+  rtsp_max_reconnect_attempts: 0
+  mqtt_reconnect_delay_seconds: 5
+
+schema:
+  # RTSP Configuration
+  rtsp_url: str
+  
+  # MQTT Configuration
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str?
+  mqtt_password: password?
+  mqtt_topic: str
+  
+  # Detection Configuration
+  detection_duration_seconds: float
+  detection_threshold_percent: int(1,100)
+  cooldown_seconds: float
+  confidence_threshold: float(0.1,1.0)
+  model_complexity: int(0,2)
+  
+  # Gesture Configuration
+  gesture_type: list(arm_raised|both_arms_raised|wave)
+  arm_raised_threshold: float(0.01,0.5)?
+  require_both_arms: bool
+  
+  # Pose Validation
+  min_pose_height_ratio: float(0.05,0.5)
+  min_landmark_visibility: float(0.1,0.9)
+  validate_pose_anatomy: bool
+  
+  # ROI Configuration
+  roi_enabled: bool
+  roi_zones:
+    - name: str
+      x1: int(0,100)
+      y1: int(0,100)
+      x2: int(0,100)
+      y2: int(0,100)
+  
+  # Performance Configuration
+  frame_skip: int(0,30)
+  max_frame_width: int(320,1920)
+  processing_fps: int(1,30)
+  
+  # IR/Low-Light Configuration
+  ir_mode_enabled: bool
+  ir_preprocessing_mode: list(none|minimal|full)
+  clahe_clip_limit: float(1.0,10.0)
+  clahe_grid_size: int(2,16)
+  brightness_boost: float(0.5,3.0)
+  contrast_boost: float(0.5,3.0)
+  ir_gamma_correction: float(0.3,2.0)
+  ir_denoise: bool
+  
+  # Logging Configuration
+  log_level: list(DEBUG|INFO|WARNING|ERROR)
+  log_detection_events: bool
+  log_frame_stats: bool
+  
+  # Debug Configuration
+  debug_save_frames: bool
+  debug_save_interval: int(1,300)
+  debug_frame_path: str
+  debug_draw_roi: bool
+  
+  # Connection Configuration
+  rtsp_reconnect_delay_seconds: int(1,60)
+  rtsp_max_reconnect_attempts: int(0,100)
+  mqtt_reconnect_delay_seconds: int(1,60)

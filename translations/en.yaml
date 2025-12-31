@@ -1,0 +1,164 @@
+# English translations for Gesture Detection Add-on
+
+configuration:
+  rtsp_url:
+    name: RTSP URL
+    description: >-
+      Full RTSP stream URL including credentials.
+      Format: rtsp://username:password@ip_address/path/to/stream
+  
+  mqtt_host:
+    name: MQTT Host
+    description: >-
+      MQTT broker hostname. Use 'core-mosquitto' for Home Assistant's built-in broker.
+  
+  mqtt_port:
+    name: MQTT Port
+    description: MQTT broker port (default: 1883)
+  
+  mqtt_username:
+    name: MQTT Username
+    description: MQTT authentication username (leave empty if not required)
+  
+  mqtt_password:
+    name: MQTT Password
+    description: MQTT authentication password (leave empty if not required)
+  
+  mqtt_topic:
+    name: MQTT Topic
+    description: >-
+      Topic to publish gesture detection events.
+  
+  detection_duration_seconds:
+    name: Detection Duration (seconds)
+    description: >-
+      How long the gesture must be held before triggering an event.
+  
+  detection_threshold_percent:
+    name: Detection Threshold (%)
+    description: >-
+      Percentage of frames within the detection duration that must contain the gesture.
+  
+  cooldown_seconds:
+    name: Cooldown Period (seconds)
+    description: >-
+      Time to wait after sending an event before another event can be triggered.
+  
+  confidence_threshold:
+    name: Detection Confidence
+    description: >-
+      Minimum confidence score (0.1-1.0) for pose detection.
+      Lower values detect more poses but may have false positives.
+  
+  gesture_type:
+    name: Gesture Type
+    description: >-
+      Type of gesture to detect:
+      - arm_raised: One arm raised above head
+      - both_arms_raised: Both arms raised above shoulders
+      - wave: Waving motion (coming soon)
+  
+  arm_raised_threshold:
+    name: Arm Raised Threshold
+    description: >-
+      How far above the nose the wrist must be (as fraction of body height).
+      Lower values are more sensitive. Default 0.15.
+  
+  require_both_arms:
+    name: Require Both Arms
+    description: >-
+      If enabled, both arms must be raised for detection.
+  
+  roi_enabled:
+    name: ROI Enabled
+    description: >-
+      Enable Region of Interest filtering. Only detect gestures in defined zones.
+  
+  roi_zones:
+    name: ROI Zones
+    description: >-
+      List of detection zones. Each zone has a name and coordinates (x1, y1, x2, y2)
+      as percentages (0-100) of the frame.
+  
+  frame_skip:
+    name: Frame Skip
+    description: >-
+      Process every Nth frame. Higher values reduce CPU usage.
+  
+  max_frame_width:
+    name: Max Frame Width
+    description: >-
+      Maximum width for frame processing. Frames larger than this will be scaled down.
+  
+  processing_fps:
+    name: Processing FPS
+    description: >-
+      Target frames per second for processing.
+  
+  ir_mode_enabled:
+    name: IR/Low-Light Mode
+    description: >-
+      Enable preprocessing for IR or low-light cameras.
+  
+  clahe_clip_limit:
+    name: CLAHE Clip Limit
+    description: >-
+      Contrast enhancement clip limit for IR mode.
+  
+  clahe_grid_size:
+    name: CLAHE Grid Size
+    description: >-
+      CLAHE tile grid size for IR mode.
+  
+  brightness_boost:
+    name: Brightness Boost
+    description: >-
+      Brightness multiplier for IR/low-light images.
+  
+  contrast_boost:
+    name: Contrast Boost
+    description: >-
+      Contrast multiplier for IR/low-light images.
+  
+  log_level:
+    name: Log Level
+    description: >-
+      Logging verbosity. DEBUG provides the most detail.
+  
+  log_detection_events:
+    name: Log Detection Events
+    description: >-
+      Log each gesture detection event.
+  
+  log_frame_stats:
+    name: Log Frame Statistics
+    description: >-
+      Log frame processing statistics periodically.
+  
+  debug_save_frames:
+    name: Save Debug Frames
+    description: >-
+      Save processed frames to /share/detect-hand-debug for troubleshooting.
+  
+  debug_save_interval:
+    name: Debug Save Interval (seconds)
+    description: >-
+      How often to save debug frames.
+  
+  debug_frame_path:
+    name: Debug Frame Path
+    description: >-
+      Path where debug frames are saved.
+  
+  rtsp_reconnect_delay_seconds:
+    name: RTSP Reconnect Delay
+    description: Seconds to wait between RTSP reconnection attempts.
+  
+  rtsp_max_reconnect_attempts:
+    name: RTSP Max Reconnect Attempts
+    description: >-
+      Maximum number of RTSP reconnection attempts (0 = unlimited).
+  
+  mqtt_reconnect_delay_seconds:
+    name: MQTT Reconnect Delay
+    description: Seconds to wait between MQTT reconnection attempts.

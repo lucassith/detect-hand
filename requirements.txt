@@ -1,0 +1,14 @@
+# Gesture Detection Add-on Dependencies
+# Version 2.0 - Using YOLOv8 instead of MediaPipe for IR compatibility
+
+# YOLOv8 for pose detection (works with IR/grayscale)
+ultralytics>=8.0.0
+
+# OpenCV for video processing
+opencv-python-headless>=4.8.0
+
+# MQTT client
+paho-mqtt>=2.0.0
+
+# NumPy for array operations
+numpy>=1.24.0,<2.0.0
